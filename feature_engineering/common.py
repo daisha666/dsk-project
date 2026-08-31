@@ -201,3 +201,74 @@ def fetch_targets(db=None):
         JOIN races r ON r.race_id = e.race_id
         ORDER BY r.race_date, e.race_id
     """)
+
+
+def group_by_race(rows):
+    """先頭要素がrace_idのタプル列を、race_id単位でグループ化する
+    （rowsは事前にrace_id順にソートされている前提。呼び出し元のSQLは
+    いずれもORDER BY race_dateまたはrace_idしているため保証される）。
+    戻り値: {race_id: [row, ...]}"""
+    groups = {}
+    for row in rows:
+        groups.setdefault(row[0], []).append(row)
+    return groups
+
+
+def normalize_min_max(values, invert=False):
+    """8項目のうち脚質力以外で使う「レース内Min-Max正規化」。
+    values: {horse_id: 素点(float) or None}（Noneはデータ欠損＝正規化対象外）
+    invert: Trueなら値が小さいほど高スコア（0に近い方が1に近くなる）になるよう
+            反転する（上がり力＝タイムは速い＝小さい方が良いため使う）。
+            距離力・回り力・安定力・血統力・騎手力・調教師力は複勝率/連対率
+            そのもの（大きい方が良い）なのでinvert=False。
+    戻り値: {horse_id: 正規化後の値(0.0~1.0) or None}
+            同一レース内の全馬が同値（max==min）の場合は差がつかないため
+            全馬0.5とする。有効値が1件も無ければ全馬Noneを返す。
+    """
+    valid = {h: v for h, v in values.items() if v is not None}
+    if not valid:
+        return {h: None for h in values}
+
+    lo, hi = min(valid.values()), max(valid.values())
+
+    result = {}
+    for horse_id, v in values.items():
+        if v is None:
+            result[horse_id] = None
+            continue
+        if hi == lo:
+            result[horse_id] = 0.5
+            continue
+        frac = (v - lo) / (hi - lo)
+        result[horse_id] = (1 - frac) if invert else frac
+
+    return result
+
+
+def load_condition_weights(db=None):
+    """condition_weightsの全行を読み込む。
+    戻り値: {(course, surface, distance): {"agari":.., "nige":.., "senko":..,
+             "sashi":.., "oikomi":.., "jockey":.., "distance":.., "turn":..,
+             "stability":.., "pedigree":.., "trainer":..}}"""
+    if db is None:
+        db = DatabaseManager()
+
+    rows = db.fetchall("""
+        SELECT course, surface, distance,
+               weight_agari, weight_nige, weight_senko, weight_sashi, weight_oikomi,
+               weight_jockey, weight_distance, weight_turn, weight_stability,
+               weight_pedigree, weight_trainer
+        FROM condition_weights
+    """)
+
+    weights = {}
+    for (course, surface, distance, w_agari, w_nige, w_senko, w_sashi, w_oikomi,
+         w_jockey, w_distance, w_turn, w_stability, w_pedigree, w_trainer) in rows:
+        weights[(course, surface, distance)] = {
+            "agari": w_agari,
+            "nige": w_nige, "senko": w_senko, "sashi": w_sashi, "oikomi": w_oikomi,
+            "jockey": w_jockey, "distance": w_distance, "turn": w_turn,
+            "stability": w_stability, "pedigree": w_pedigree, "trainer": w_trainer,
+        }
+
+    return weights

@@ -35,7 +35,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
 from database.db_manager import DatabaseManager
-from feature_engineering.common import get_past_races, load_entity_histories
+from feature_engineering.common import (
+    get_past_races, group_by_race, load_condition_weights,
+    load_entity_histories, normalize_min_max,
+)
 
 
 def compute_place_rate(matching):
@@ -77,24 +80,64 @@ class JockeyPowerFeatureBuilder:
         """
         self.db.execute(sql, (race_id, horse_id, jockey_power))
 
-    def fetch_targets(self):
-        """entriesテーブルにある全 (race_id, horse_id, race_date, round, jockey) を返す"""
+    def fetch_race_targets(self):
+        """entriesテーブルにある全 (race_id, horse_id, race_date, round, course,
+        surface, distance, jockey) を返す"""
         return self.db.fetchall("""
-            SELECT e.race_id, e.horse_id, r.race_date, r.round, e.jockey
+            SELECT e.race_id, e.horse_id, r.race_date, r.round,
+                   r.course, r.surface, r.distance, e.jockey
             FROM entries e
             JOIN races r ON r.race_id = e.race_id
             ORDER BY r.race_date, r.round
         """)
 
     def build(self, log=print):
-        """TODO: レース内Min-Max正規化・condition_weights適用は8項目が揃ってから
-        まとめて実装する（正規化はレース単位でしか行えないため）。
-        ここでは複勝率そのものの算出・保存までを行う"""
-        raise NotImplementedError("レース内正規化・重み付けロジックを実装する")
+        """entriesテーブルにある全レースについて、レース内で騎手力を
+        Min-Max正規化し、condition_weights.weight_jockeyを掛けて保存する"""
+        histories = load_entity_histories("jockey", self.db)
+        weights = load_condition_weights(self.db)
+        race_groups = group_by_race(self.fetch_race_targets())
+
+        stats = {"total": 0, "with_data": 0, "no_data": 0, "no_condition_weight": 0}
+
+        for race_id, rows in race_groups.items():
+            _, _, _, _round, course, surface, distance, _jockey = rows[0]
+            weight_row = weights.get((course, surface, distance))
+
+            raw_values = {}
+            for r_id, horse_id, race_date, round_no, _course, _surface, _distance, jockey in rows:
+                rate, _n = self.compute_jockey_place_rate(histories, jockey, race_date, round_no)
+                raw_values[horse_id] = rate
+
+            normalized = normalize_min_max(raw_values, invert=False)
+
+            for horse_id, norm_value in normalized.items():
+                stats["total"] += 1
+
+                if norm_value is None:
+                    self.save_feature(race_id, horse_id, None)
+                    stats["no_data"] += 1
+                    continue
+
+                if weight_row is None:
+                    self.save_feature(race_id, horse_id, None)
+                    stats["no_condition_weight"] += 1
+                    continue
+
+                self.save_feature(race_id, horse_id, norm_value * weight_row["jockey"])
+                stats["with_data"] += 1
+
+        log(f"完了: 総件数={stats['total']} 算出={stats['with_data']} "
+            f"騎手データなし={stats['no_data']} 重みマスターなし={stats['no_condition_weight']}")
+
+        return stats
 
 
 if __name__ == "__main__":
     print("=" * 40)
     print("dsk_Project")
-    print("JockeyPowerFeatureBuilder 読み込み成功")
+    print("JockeyPowerFeatureBuilder 実行")
     print("=" * 40)
+
+    builder = JockeyPowerFeatureBuilder()
+    builder.build()
