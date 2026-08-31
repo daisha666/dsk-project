@@ -83,7 +83,9 @@ class DskProject:
 
         print("Yahoo競馬 出馬表・結果・払戻金・血統backfill取得（netkeiba/ittai.netは不採用）")
 
-        print("騎手力・調教師力の計算（自前計算、正規化・重み付けは未実装）")
+        print("8項目特徴量の計算（上がり力・脚質力・騎手力・距離力・回り力・安定力・血統力・調教師力）")
+
+        print("8項目のレース内正規化・条件別重み付け・overall_score算出")
 
         print("オッズ反映後の最終指数・順位計算（odds_score.py）")
 
@@ -93,9 +95,7 @@ class DskProject:
 
         print("-----------------------------------")
 
-        print("上がり力・脚質力・距離力・回り力・安定力・血統力の実装")
-
-        print("8項目のレース内正規化・条件別重み付け（overall_score算出）")
+        print("ペースバイアス補正（pace_bias.py。現状は常にNULL=補正なし扱い）")
 
         print("LightGBM学習・ウォークフォワード検証")
 

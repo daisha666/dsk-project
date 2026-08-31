@@ -34,9 +34,10 @@ GASベースの「競馬予想2」で得られた知見――**オッズを反�
 - [x] オッズ反映後の最終指数・順位計算ロジック（`feature_engineering/odds_score.py`）
 - [x] Yahoo競馬（sports.yahoo.co.jp/keiba/）データ収集: 結果・払戻金・出馬表・血統backfill
       （`collectors/yahoo_result_collector.py` / `yahoo_denma_collector.py`）
-- [x] 騎手力・調教師力（自前計算、`feature_engineering/jockey_power.py` / `trainer_power.py`）
 - [x] 条件別重みマスター（`database/condition_weights`、10競馬場×芝/ダート×18距離=360パターンをインポート済み。`database/import_condition_weights.py` / `data/condition_weights.csv`）
-- [ ] 上がり力・脚質力・距離力・回り力・安定力・血統力の実装、レース内正規化・重み付け（`feature_engineering/` に骨格あり）
+- [x] 8項目すべて実装（上がり力・脚質力・騎手力・距離力・回り力・安定力・血統力・調教師力）＋レース内Min-Max正規化・条件別重み付け・`overall_score`算出
+      （`feature_engineering/agari_power.py` 等 + `overall_score.py`。350レース・4671頭分の実データで検証済み）
+- [ ] ペースバイアス補正（`feature_engineering/pace_bias.py`。現状は常にNULL=補正なしとして扱われる）
 - [ ] LightGBM学習・ウォークフォワード検証（Stage2）
 - [ ] 期待値ベースの購入判定（Stage3）
 
