@@ -132,6 +132,10 @@ CREATE TABLE IF NOT EXISTS payouts (
 ------------------------------------------------------
 -- 条件別重みマスター（旧condition_masterシート相当）
 -- 「競馬場×芝orダ×距離」の組み合わせごとに8項目の重み%を管理する
+--
+-- 脚質力（開発指示書2.2）だけは他の7項目と異なり、レース内正規化ではなく
+-- 「脚質区分（逃げ/先行/差し/追込）ごとの重み値をそのまま代入」するため、
+-- 単一のweight_kyakushitsu列ではなく、区分ごとに4列（weight_nige等）を持つ。
 ------------------------------------------------------
 CREATE TABLE IF NOT EXISTS condition_weights (
 
@@ -140,7 +144,10 @@ CREATE TABLE IF NOT EXISTS condition_weights (
     distance INTEGER,
 
     weight_agari REAL,          -- 上がり力
-    weight_kyakushitsu REAL,    -- 脚質力
+    weight_nige REAL,           -- 脚質力（逃げ）
+    weight_senko REAL,          -- 脚質力（先行）
+    weight_sashi REAL,          -- 脚質力（差し）
+    weight_oikomi REAL,         -- 脚質力（追込）
     weight_jockey REAL,         -- 騎手力
     weight_distance REAL,       -- 距離力
     weight_turn REAL,           -- 回り力

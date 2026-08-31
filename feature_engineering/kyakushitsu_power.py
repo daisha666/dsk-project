@@ -7,11 +7,16 @@ Version 0.1 (TODO: 未実装 / 土台のみ)
   元データ = 脚質（逃げ/先行/差し/追込）。他の7項目と違い正規化はせず、
   脚質区分ごとの重み値をそのまま代入する。
 
+脚質区分ごとの重み値（database/condition_weights.weight_nige / weight_senko /
+weight_sashi / weight_oikomi、data/condition_weights.csvからインポート済み）は
+用意できている。残る課題は「対象馬がどの脚質区分か」の判定のみ。
+
 TODO:
   - entries.running_style（逃げ/先行/差し/追込）の取得元を確定する
     （Yahoo競馬の出馬表に脚質表記がない場合、過去走のpassing（通過順位）
     から脚質を推定するロジックが必要になる可能性がある）
-  - 脚質区分ごとの重み値テーブル（4区分）の設計
+  - 判定した脚質区分に応じてcondition_weightsの対応列（weight_nige等）を
+    選択し、kyakushitsu_powerへ代入する
   - pace_bias.py（ペースバイアス補正）との連携方法の整理
 """
 

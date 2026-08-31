@@ -35,6 +35,7 @@ GASベースの「競馬予想2」で得られた知見――**オッズを反�
 - [x] Yahoo競馬（sports.yahoo.co.jp/keiba/）データ収集: 結果・払戻金・出馬表・血統backfill
       （`collectors/yahoo_result_collector.py` / `yahoo_denma_collector.py`）
 - [x] 騎手力・調教師力（自前計算、`feature_engineering/jockey_power.py` / `trainer_power.py`）
+- [x] 条件別重みマスター（`database/condition_weights`、10競馬場×芝/ダート×18距離=360パターンをインポート済み。`database/import_condition_weights.py` / `data/condition_weights.csv`）
 - [ ] 上がり力・脚質力・距離力・回り力・安定力・血統力の実装、レース内正規化・重み付け（`feature_engineering/` に骨格あり）
 - [ ] LightGBM学習・ウォークフォワード検証（Stage2）
 - [ ] 期待値ベースの購入判定（Stage3）
