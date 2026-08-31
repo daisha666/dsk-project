@@ -1,0 +1,8 @@
+# Google Sheets連携用の認証キー（秘密情報のためコミットしない）
+config/google_credentials.json
+
+# SQLiteデータベース本体（サイズが大きいためリポジトリに含めない）
+database/dsk_project.db
+
+__pycache__/
+*.pyc
