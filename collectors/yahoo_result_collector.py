@@ -14,6 +14,19 @@ Version 0.1
 （発走前でも取得できる情報と、結果確定後にしか取得できない情報を
 分離するため。PROJECT_EVのhistorical_race_collector.py /
 upcoming_race_collector.pyの分割と同じ考え方）。
+
+血統（父・母父）backfillについて:
+  netkeiba（db.netkeiba.com）は使わない。Yahoo!スポーツナビ競馬の出馬表
+  （race/denma/{race_id}）ページ自体に「父：X母：Y(母父：Z)」の形で
+  血統が載っており、これはレース終了後もアーカイブとして残り続けることを
+  確認済み（同一サイト内で完結するため、netkeibaとのhorse_id突合が
+  不要になる利点がある）。ただし本コレクター（collect()）は結果ページ
+  （race/index）しか見ないため、ここで新規にhorsesテーブルへ登録される
+  馬のsire/damsireはNULLのままになる（yahoo_denma_collector.pyは
+  「まだ結果が出ていないレース」だけを対象にしているため、こちらの
+  収集対象とは重ならない）。この欠落を埋めるのが
+  fetch_denma_pedigrees() / backfill_pedigrees()（PROJECT_EVの
+  historical_race_collector.backfill_pedigreesと同じ設計）。
 """
 
 import re
@@ -55,6 +68,9 @@ PASSING_LAST3F_PATTERN = re.compile(r"^(\d{2}(?:-\d{2})*)(\d{2}\.\d)$")
 
 # 人気(オッズ)セル "6(19.8)" -> 人気6 オッズ19.8
 POPULARITY_ODDS_PATTERN = re.compile(r"^(\d+)\(([\d.]+)\)$")
+
+# 出馬表（denma）ページの血統セル「父：X母：Y(母父：Z)」（血統backfillで使う）
+DENMA_PEDIGREE_PATTERN = re.compile(r"父：(.+?)母：(.+?)\(母父：(.+?)\)")
 
 PAYOUT_LABELS = {"単勝", "複勝", "枠連", "馬連", "ワイド", "馬単", "3連複", "3連単"}
 UNORDERED_BET_TYPES = {"枠連", "馬連", "ワイド", "3連複"}
@@ -399,6 +415,95 @@ class YahooResultCollector(BaseCollector):
         return race_row, self.parse_result_rows(soup), self.parse_payouts(soup)
 
     # ------------------------------------------------------------
+    # 血統backfill（race/denma ページを再取得し、父・母父だけを補完する）
+    # ------------------------------------------------------------
+
+    def fetch_denma_pedigrees(self, race_id):
+        """race/denma/{race_id}（出馬表。結果確定後もアーカイブされたページが
+        参照できる）から {horse_id: (sire, damsire)} を取得する"""
+        url = f"{BASE_URL}/keiba/race/denma/{race_id}"
+        soup = self.get_html(url)
+        time.sleep(self.sleep_sec)
+
+        table = None
+        for t in soup.find_all("table"):
+            header_text = t.find("tr").get_text() if t.find("tr") else ""
+            if "馬番" in header_text and "父" in header_text:
+                table = t
+                break
+
+        pedigrees = {}
+        if table is None:
+            return pedigrees
+
+        for tr in table.find_all("tr")[1:]:
+            cells = tr.find_all(["th", "td"])
+            if not cells:
+                continue
+
+            horse_link = None
+            for c in cells:
+                horse_link = c.find("a", href=HORSE_LINK_PATTERN)
+                if horse_link:
+                    break
+            if not horse_link:
+                continue
+            horse_id = HORSE_LINK_PATTERN.search(horse_link["href"]).group(1)
+
+            pedigree_text = None
+            for c in cells:
+                cell_text = c.get_text(strip=True)
+                if "父：" in cell_text:
+                    pedigree_text = cell_text
+                    break
+            if pedigree_text is None:
+                continue
+
+            pedigree_match = DENMA_PEDIGREE_PATTERN.search(pedigree_text)
+            if not pedigree_match:
+                continue
+
+            sire, _dam, damsire = pedigree_match.groups()
+            pedigrees[horse_id] = (sire.strip(), damsire.strip())
+
+        return pedigrees
+
+    def backfill_pedigrees(self, race_ids, log=print):
+        """指定したrace_idの出馬表ページから父・母父を取得し、horsesテーブルを更新する。
+        対象race_idの絞り込み（例: horses.sire IS NULLな馬が出走したレースだけ）は
+        呼び出し側が行う"""
+        stats = {"races_checked": 0, "horses_updated": 0, "errors": []}
+
+        for race_id in race_ids:
+            stats["races_checked"] += 1
+
+            try:
+                pedigrees = self.fetch_denma_pedigrees(race_id)
+            except Exception as exc:
+                stats["errors"].append(f"race {race_id}: {exc}")
+                continue
+
+            for horse_id, (sire, damsire) in pedigrees.items():
+                self.save_horse_pedigree(horse_id, sire, damsire)
+                stats["horses_updated"] += 1
+
+            log(f"[{race_id}] {len(pedigrees)}頭分の血統を取得")
+
+        return stats
+
+    def fetch_race_ids_missing_pedigree(self):
+        """sire/damsireが未取得の馬が出走しているrace_id一覧を返す
+        （backfill_pedigreesの対象を絞り込む際に使う）"""
+        rows = self.db.fetchall("""
+            SELECT DISTINCT e.race_id
+            FROM entries e
+            JOIN horses h ON h.horse_id = e.horse_id
+            WHERE h.sire IS NULL
+            ORDER BY e.race_id
+        """)
+        return [r[0] for r in rows]
+
+    # ------------------------------------------------------------
     # DB保存
     # ------------------------------------------------------------
 
@@ -420,6 +525,12 @@ class YahooResultCollector(BaseCollector):
     def save_horse(self, horse_id, horse_name):
         sql = "INSERT OR IGNORE INTO horses (horse_id, horse_name, sire, damsire) VALUES (?, ?, NULL, NULL)"
         self.db.execute(sql, (horse_id, horse_name))
+
+    def save_horse_pedigree(self, horse_id, sire, damsire):
+        self.db.execute(
+            "UPDATE horses SET sire = ?, damsire = ? WHERE horse_id = ?",
+            (sire, damsire, horse_id),
+        )
 
     def save_entry(self, race_id, row):
         sql = """
@@ -530,4 +641,13 @@ if __name__ == "__main__":
 
     print()
     for key, value in result_stats.items():
+        print(f"{key}: {value}")
+
+    print()
+    print("血統backfill中...")
+    pedigree_race_ids = collector.fetch_race_ids_missing_pedigree()
+    pedigree_stats = collector.backfill_pedigrees(pedigree_race_ids)
+
+    print()
+    for key, value in pedigree_stats.items():
         print(f"{key}: {value}")
