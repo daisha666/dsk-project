@@ -130,27 +130,6 @@ CREATE TABLE IF NOT EXISTS payouts (
 );
 
 ------------------------------------------------------
--- 騎手・調教師リーディング成績（ittai.net由来）
--- PROJECT_EVのjockey_trainer_stats.pyのようにDB内の過去成績から
--- 動的に算出するのではなく、「競馬予想2」を踏襲し外部リーディング
--- サイトの複勝率をそのまま特徴量として取り込む。
--- retrieved_at時点のスナップショットであり、リーケージ防止のため
--- 特徴量生成時は対象レースのrace_date以前に取得したものだけを使う。
-------------------------------------------------------
-CREATE TABLE IF NOT EXISTS jockey_trainer_leading (
-
-    entity_type TEXT,    -- 'jockey' or 'trainer'
-    entity_name TEXT,
-
-    place_rate REAL,     -- 複勝率
-
-    retrieved_at TEXT,
-
-    PRIMARY KEY (entity_type, entity_name, retrieved_at)
-
-);
-
-------------------------------------------------------
 -- 条件別重みマスター（旧condition_masterシート相当）
 -- 「競馬場×芝orダ×距離」の組み合わせごとに8項目の重み%を管理する
 ------------------------------------------------------

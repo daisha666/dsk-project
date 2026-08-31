@@ -81,21 +81,21 @@ class DskProject:
 
         print("フォルダ管理")
 
+        print("Yahoo競馬 出馬表・結果・払戻金・血統backfill取得（netkeiba/ittai.netは不採用）")
+
+        print("騎手力・調教師力の計算（自前計算、正規化・重み付けは未実装）")
+
+        print("オッズ反映後の最終指数・順位計算（odds_score.py）")
+
         print()
 
         print("未実装（Stage1 土台のみ）")
 
         print("-----------------------------------")
 
-        print("Yahoo競馬 レース一覧・出馬表・結果取得")
+        print("上がり力・脚質力・距離力・回り力・安定力・血統力の実装")
 
-        print("netkeiba 血統・過去成績取得")
-
-        print("ittai.net 騎手・調教師リーディング取得")
-
-        print("8項目特徴量生成（上がり力・脚質力・騎手力・距離力・回り力・安定力・血統力・調教師力）")
-
-        print("オッズ反映後の最終指数・順位計算（odds_score.py は実装済み。8項目の上流特徴量待ち）")
+        print("8項目のレース内正規化・条件別重み付け（overall_score算出）")
 
         print("LightGBM学習・ウォークフォワード検証")
 
