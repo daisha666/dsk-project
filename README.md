@@ -23,7 +23,8 @@ GASベースの「競馬予想2」で得られた知見――**オッズを反�
 
 - [x] SQLiteスキーマ設計（`database/schema.sql`）
 - [x] オッズ反映後の最終指数・順位計算ロジック（`feature_engineering/odds_score.py`）
-- [ ] Yahoo競馬・netkeiba・ittai.netのデータ収集（`collectors/` は骨格のみ）
+- [x] Yahoo競馬（sports.yahoo.co.jp/keiba/）データ収集: 結果・払戻金・出馬表（`collectors/yahoo_result_collector.py` / `yahoo_denma_collector.py`）
+- [ ] netkeiba・ittai.netのデータ収集（`collectors/` は骨格のみ）
 - [ ] 8項目特徴量の実装（`feature_engineering/` は骨格のみ）
 - [ ] LightGBM学習・ウォークフォワード検証（Stage2）
 - [ ] 期待値ベースの購入判定（Stage3）
