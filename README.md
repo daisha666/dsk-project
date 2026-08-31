@@ -28,18 +28,33 @@ GASベースの「競馬予想2」で得られた知見――**オッズを反�
 >   取れない）ため不採用。代わりにPROJECT_EVの`jockey_trainer_stats.py`と同じ方針――自前で
 >   収集したYahoo競馬のレース結果から騎手・調教師ごとの複勝率を直接計算する――に切り替えた
 
-## 現在の状況（Stage1: 土台）
+## 現在の状況
 
+### Stage1（土台）
 - [x] SQLiteスキーマ設計（`database/schema.sql`）
 - [x] オッズ反映後の最終指数・順位計算ロジック（`feature_engineering/odds_score.py`）
 - [x] Yahoo競馬（sports.yahoo.co.jp/keiba/）データ収集: 結果・払戻金・出馬表・血統backfill
       （`collectors/yahoo_result_collector.py` / `yahoo_denma_collector.py`）
 - [x] 条件別重みマスター（`database/condition_weights`、10競馬場×芝/ダート×18距離=360パターンをインポート済み。`database/import_condition_weights.py` / `data/condition_weights.csv`）
 - [x] 8項目すべて実装（上がり力・脚質力・騎手力・距離力・回り力・安定力・血統力・調教師力）＋レース内Min-Max正規化・条件別重み付け・`overall_score`算出
-      （`feature_engineering/agari_power.py` 等 + `overall_score.py`。350レース・4671頭分の実データで検証済み）
+      （`feature_engineering/agari_power.py` 等 + `overall_score.py`）
 - [ ] ペースバイアス補正（`feature_engineering/pace_bias.py`。現状は常にNULL=補正なしとして扱われる）
-- [ ] LightGBM学習・ウォークフォワード検証（Stage2）
-- [ ] 期待値ベースの購入判定（Stage3）
+
+### Stage2（AI）
+- [x] LightGBM学習（`ai/build_dataset.py` / `ai/train_model.py`）: 単勝（1着=1）モデルを、
+      overall_score + market_odds/market_popularity を含む**モデルA**と、市場情報を除いた
+      **モデルB**の両方で学習・保存できる
+- [x] 日付分割・複数フォールドのウォークフォワード検証（`ai/walk_forward_backtest.py`。フォールドは
+      DB内のrace_dateの実際の範囲から動的に生成する。データ期間が伸びたらPROJECT_EVのような
+      固定月次フォールドへの切り替えを検討）
+- [ ] ハイパーパラメータチューニング
+
+### Stage3（投資AI）
+- [ ] 期待値ベースの購入判定・回収率バックテスト
+
+初回検証（2026-08-08〜08-30、4フォールド、2,454件。**1ヶ月弱・小サンプルの参考値**）:
+モデルA（市場情報あり）AUC=0.7857、モデルB（市場情報除外）AUC=0.6269（AUC差+0.1588）。
+全フォールドで一貫してモデルAが上回った。データ収集期間を伸ばして再検証が必要。
 
 ## セットアップ
 

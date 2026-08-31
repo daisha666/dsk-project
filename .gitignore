@@ -4,5 +4,9 @@ config/google_credentials.json
 # SQLiteデータベース本体（サイズが大きいためリポジトリに含めない）
 database/dsk_project.db
 
+# 学習済みモデル（train_model.pyで再生成できる。データ収集期間がまだ短く
+# 頻繁に再学習する段階のため、バイナリをリポジトリに含めない）
+model/*.pkl
+
 __pycache__/
 *.pyc
