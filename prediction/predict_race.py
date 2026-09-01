@@ -37,7 +37,6 @@ Stage3確定基準（README「Stage3としての基準値」参照）:
   全件で毎回学習し直す（実行のたびに直近レースまで反映した最新モデルになる）。
 """
 
-import json
 import sys
 from pathlib import Path
 
@@ -54,8 +53,8 @@ from ai.build_dataset import (
     build_upcoming_dataset,
 )
 from ai.train_model import train_model
-from config.config import PROJECT_ROOT as CONFIG_PROJECT_ROOT
 from database.db_manager import DatabaseManager
+from prediction.generate_report import generate_site
 
 # Stage3確定基準値（帯の代表値。README「Stage3としての基準値」参照）
 EV_THRESHOLD = 1.4
@@ -63,10 +62,6 @@ ODDS_CAP = 30
 CLASS_FILTER = True
 
 PREDICTION_MARKS = ["◎", "○", "▲", "△", "☆"]
-
-# GitHub Pagesアプリ（docs/）がそのまま読み込む場所に直接書き出す
-# （docs/index.htmlがfetch("data/predictions.json")する）
-PREDICTIONS_OUTPUT_PATH = CONFIG_PROJECT_ROOT / "docs" / "data" / "predictions.json"
 
 
 def train_current_model(log=print):
@@ -154,69 +149,6 @@ def print_report(scored, log=print):
             f"（オッズ{row['market_odds']:.1f}倍 EV{row['expected_value']:.2f}）")
 
 
-def export_predictions(scored, output_path=PREDICTIONS_OUTPUT_PATH):
-    """予測結果をJSONに書き出す（Google Sheets連携・GitHub Pagesアプリが読み込む
-    共通の中間ファイル。列名はスプレッドシート/アプリ側でそのまま使える形にする）"""
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    if len(scored) == 0:
-        payload = {
-            "generated_at": pd.Timestamp.now().isoformat(),
-            "settings": {
-                "ev_threshold": EV_THRESHOLD,
-                "odds_cap": ODDS_CAP,
-                "class_filter": CLASS_FILTER,
-            },
-            "races": [],
-        }
-    else:
-        races = []
-        for race_id, group in scored.groupby("race_id"):
-            info = group.iloc[0]
-            display = group.sort_values("odds_adjusted_rank", na_position="last")
-
-            horses = []
-            for _, row in display.iterrows():
-                horses.append({
-                    "mark": row["mark"],
-                    "horse_number": int(row["horse_number"]),
-                    "horse_name": row["horse_name"],
-                    "raw_rank": None if pd.isna(row["raw_rank"]) else int(row["raw_rank"]),
-                    "odds_adjusted_rank": None if pd.isna(row["odds_adjusted_rank"]) else int(row["odds_adjusted_rank"]),
-                    "market_odds": None if pd.isna(row["market_odds"]) else float(row["market_odds"]),
-                    "market_popularity": None if pd.isna(row["market_popularity"]) else int(row["market_popularity"]),
-                    "pred_win_prob": float(row["pred_win_prob"]),
-                    "expected_value": float(row["expected_value"]),
-                    "is_recommended": bool(row["is_recommended"]),
-                })
-
-            races.append({
-                "race_id": race_id,
-                "race_date": info["race_date"],
-                "course": info["course"],
-                "round": int(info["round"]),
-                "surface": info["surface"],
-                "distance": int(info["distance"]),
-                "race_class": info["race_class"],
-                "horses": horses,
-            })
-
-        payload = {
-            "generated_at": pd.Timestamp.now().isoformat(),
-            "settings": {
-                "ev_threshold": EV_THRESHOLD,
-                "odds_cap": ODDS_CAP,
-                "class_filter": CLASS_FILTER,
-            },
-            "races": races,
-        }
-
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-
-    return output_path
-
-
 def save_predictions_to_db(scored, db=None):
     """予測結果をpredictionsテーブルへ保存する（実運用の予測ログ）。
     score=odds_adjusted_score、probability=pred_win_prob、rank=odds_adjusted_rankを
@@ -247,7 +179,9 @@ def save_predictions_to_db(scored, db=None):
         db.execute(sql, (
             row["race_id"], row["horse_id"],
             float(row["odds_adjusted_score"]) if not pd.isna(row["odds_adjusted_score"]) else None,
-            float(row["pred_win_prob"]), float(row["expected_value"]), rank,
+            None if pd.isna(row["pred_win_prob"]) else float(row["pred_win_prob"]),
+            None if pd.isna(row["expected_value"]) else float(row["expected_value"]),
+            rank,
         ))
         n += 1
 
@@ -267,12 +201,13 @@ def main():
     scored = score_upcoming_races(model)
     print_report(scored)
 
-    output_path = export_predictions(scored)
-    print()
-    print(f"予測結果を出力: {output_path}")
-
     n_saved = save_predictions_to_db(scored)
+    print()
     print(f"predictionsテーブルへ保存: {n_saved}件")
+
+    settings = {"ev_threshold": EV_THRESHOLD, "odds_cap": ODDS_CAP, "class_filter": CLASS_FILTER}
+    generated_at = pd.Timestamp.now().isoformat()
+    generate_site(scored, settings, generated_at)
 
 
 if __name__ == "__main__":

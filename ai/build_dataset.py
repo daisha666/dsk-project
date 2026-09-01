@@ -134,6 +134,7 @@ UPCOMING_QUERY = """
         r.race_date,
         r.course,
         r.round,
+        r.race_name,
         r.distance,
         r.surface,
         r.track_condition,

@@ -65,9 +65,14 @@ GASベースの「競馬予想2」で得られた知見――**オッズを反�
 - [x] 実運用の予測ログ（`predictions`テーブル）と確定結果を突き合わせる実データ検証
       （`analysis/prediction_verification.py`。机上バックテストではなく、実際に運用しながら
       蓄積されるデータで継続検証していく仕組み）
-- [x] GitHub Pagesアプリ（`docs/`。https://daisha666.github.io/dsk-project/ で公開。
-      `predict_race.py`が書き出す`docs/data/predictions.json`を読み込み、買い目推奨・
-      全馬スコア一覧〈素点順位・オッズ後順位を両方表示〉を表示する単一HTML/JSページ）
+- [x] GitHub Pagesアプリ（`docs/`。https://daisha666.github.io/dsk-project/ で公開）。
+      PROJECT_EV（project-ev-app）と同じ階層構造・静的サイト生成方式（`prediction/generate_report.py`）
+      に作り直し済み: ホーム画面（開催日一覧。直近`MAX_DATES_ON_HOME`=4件のみ表示。
+      一覧から外れた開催日も詳細ページ自体は残るためURL直指定で閲覧可）→ その日のレース一覧
+      （競馬場・R番号・レース名。GI〜GIIIバッジ表示）→ 個別レースの予想画面（印・全馬スコア
+      一覧〈素点順位・オッズ後順位を両方表示〉・買い目推奨のハイライト）の3階層。
+      以前の単一HTML/JS（`docs/data/predictions.json`をfetchして描画）は廃止し、
+      `predict_race.py`実行のたびにPython側でHTMLを直接書き出す方式に変更した
 - [x] **Google Sheets連携（操作パネル・検証結果・AI自己分析の3タブ）**。実際のスプレッドシート
       `dsk_Project`（ID: `1CtHs765uaLP-E2BnY-CWgDAaR3VVoKt_yiVYaInm0Fs`）に接続済み。
       - 操作パネル（`automation/sheet_control_panel.py`）: 3つのチェックボックス

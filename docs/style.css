@@ -1,0 +1,198 @@
+:root {
+  --bg: #0f1420;
+  --panel: #171e2e;
+  --panel-alt: #1f2838;
+  --border: #2a3448;
+  --text: #e8ecf4;
+  --text-dim: #93a0b8;
+  --accent: #5aa9ff;
+  --good: #4cd07d;
+  --warn: #ffb347;
+  --bad: #ff6b6b;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Hiragino Sans", "Yu Gothic", -apple-system, BlinkMacSystemFont, sans-serif;
+  padding: 16px;
+}
+a { color: inherit; }
+.container {
+  max-width: 960px;
+  margin: 0 auto;
+}
+header, .top-header {
+  max-width: 960px;
+  margin: 0 auto 20px;
+}
+h1 {
+  font-size: 1.4rem;
+  margin: 0 0 4px;
+}
+.logo {
+  margin-right: 6px;
+}
+.subtitle, .sub {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  margin: 0 0 12px;
+}
+.settings-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 0.78rem;
+}
+.settings-bar span {
+  background: var(--panel-alt);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 10px;
+  color: var(--text-dim);
+}
+.empty-state {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 32px 20px;
+  text-align: center;
+  color: var(--text-dim);
+}
+
+/* 開催日一覧（ホーム画面） */
+.date-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.date-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  text-decoration: none;
+}
+.date-card:hover { border-color: var(--accent); }
+.date-text { font-weight: 600; font-size: 1rem; }
+.count-text { color: var(--text-dim); font-size: 0.8rem; margin-top: 2px; }
+.arrow { color: var(--text-dim); font-size: 1.3rem; }
+
+/* その日のレース一覧 */
+.back-link {
+  display: inline-block;
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 0.85rem;
+  margin-bottom: 12px;
+}
+.race-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.race-nav-card {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  text-decoration: none;
+}
+.race-nav-card:hover { border-color: var(--accent); }
+.race-nav-card .badge {
+  background: var(--warn);
+  color: #241300;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 0.7rem;
+}
+.race-nav-card .course { font-weight: 600; }
+.race-nav-card .round { color: var(--text-dim); font-size: 0.85rem; }
+.race-nav-card .name {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  margin-left: auto;
+  text-align: right;
+}
+
+/* レース予想（詳細）ページ */
+.race-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.race-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.race-title {
+  font-weight: 600;
+  font-size: 1.05rem;
+}
+.race-meta {
+  color: var(--text-dim);
+  font-size: 0.82rem;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+th, td {
+  padding: 6px 6px;
+  text-align: right;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+th:nth-child(1), td:nth-child(1),
+th:nth-child(3), td:nth-child(3) {
+  text-align: center;
+}
+th:nth-child(2), td:nth-child(2) {
+  text-align: left;
+}
+th {
+  color: var(--text-dim);
+  font-weight: 500;
+  font-size: 0.72rem;
+}
+.mark {
+  font-size: 1rem;
+}
+.recommended-row {
+  background: rgba(76, 208, 125, 0.08);
+}
+.badge-buy {
+  display: inline-block;
+  background: var(--good);
+  color: #05210f;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 0.7rem;
+}
+.table-scroll {
+  overflow-x: auto;
+}
+
+footer, .footer-note {
+  max-width: 960px;
+  margin: 24px auto 0;
+  color: var(--text-dim);
+  font-size: 0.72rem;
+  text-align: center;
+}

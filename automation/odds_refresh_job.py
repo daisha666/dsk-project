@@ -70,10 +70,12 @@ def run_odds_refresh_job(log=print):
     odds_builder.build_for_races(updated_races, log=log)
 
     log("predict_race.py: 予測勝率キャッシュ（predictionsテーブル）を使い期待値を再計算")
-    from prediction.predict_race import export_predictions, save_predictions_to_db
+    from prediction.predict_race import save_predictions_to_db
     from ai.build_dataset import build_upcoming_dataset
     from ai.backtest import is_class_included
     from prediction.predict_race import EV_THRESHOLD, ODDS_CAP, CLASS_FILTER, assign_marks
+    from prediction.generate_report import generate_site
+    import pandas as pd
 
     upcoming = build_upcoming_dataset()
     if len(upcoming) == 0:
@@ -110,8 +112,11 @@ def run_odds_refresh_job(log=print):
     upcoming["is_recommended"] = ev_ok & odds_ok & class_ok
     scored = assign_marks(upcoming)
 
-    export_predictions(scored)
     n_saved = save_predictions_to_db(scored)
+
+    settings = {"ev_threshold": EV_THRESHOLD, "odds_cap": ODDS_CAP, "class_filter": CLASS_FILTER}
+    generated_at = pd.Timestamp.now().isoformat()
+    generate_site(scored, settings, generated_at, log=log)
 
     log("GitHub Pagesへデプロイ")
     from automation.git_deploy import deploy_docs
