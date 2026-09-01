@@ -1,14 +1,18 @@
 """
 dsk_Project
-自動化ジョブ: 出馬表取得→予想実行
-Version 0.1
+自動化ジョブ: 出馬表取得→特徴量差分計算→予想実行
+Version 0.2
 
 collectors/yahoo_denma_collector.pyで未確定レースの出馬表を取得し、
-prediction/predict_race.pyで予想・買い目推奨を計算する
-（8項目・overall_score・odds_adjusted_scoreの再計算はこのジョブでは行わない。
-新規に取得した出馬表の特徴量計算は別途フル再計算ジョブに任せる設計が
-将来的には必要になる可能性があるが、Stage1土台の実装が非常に重い
-〔約7時間、README「既知の課題」参照〕ため、現段階では手動実行を前提とする）
+feature_engineering/build_for_new_races.pyで8項目・overall_score・
+odds_adjusted_scoreを差分計算してから、prediction/predict_race.pyで
+予想・買い目推奨を計算する。
+
+（旧v0.1では特徴量計算を別途フル再計算ジョブに任せる設計だったが、全件
+フル再計算は約7時間かかり自動化に組み込めなかった。DB接続開閉の回数
+〔対象レース数×出走頭数に比例〕が支配的コストだったため、対象レースを
+絞り込んだbuild_for_races()を8項目それぞれに実装し、新規レースだけの
+差分計算で完結するようにした。README「既知の運用課題」参照）
 """
 
 import sys
@@ -30,8 +34,13 @@ def run_denma_predict_job(log=print):
     if collect_stats["races_saved"] == 0:
         return "出馬表: 新規保存0件（対象レース無し）。predict_race.pyはスキップ"
 
-    log("予想実行を開始（predict_race.pyはfeature_engineering未計算のレースを"
-        "スコアできない点に注意。事前に8項目パイプラインの実行が必要）")
+    log("特徴量差分計算を開始（8項目・overall_score・odds_adjusted_score）")
+    from feature_engineering.build_for_new_races import build_features_for_races, fetch_unconfirmed_race_ids
+
+    unconfirmed_race_ids = fetch_unconfirmed_race_ids()
+    build_features_for_races(unconfirmed_race_ids, log=log)
+
+    log("予想実行を開始")
 
     from prediction.predict_race import (
         CLASS_FILTER,

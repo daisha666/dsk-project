@@ -126,13 +126,17 @@ class KyakushitsuPowerFeatureBuilder:
             ORDER BY r.race_date, e.race_id
         """)
 
-    def build(self, log=print):
-        """entriesテーブルにある全レースについて脚質区分を推定し、
-        condition_weightsの該当区分の重み値をkyakushitsu_powerとして保存する
-        （他の7項目と異なりレース内正規化は行わない）"""
+    def build_for_races(self, race_ids, log=print):
+        """指定したrace_idだけについて脚質区分を推定し、kyakushitsu_powerを
+        再計算・保存する（automation/denma_predict_job.pyのような新規レース
+        向けの差分計算用）"""
         histories = load_horse_histories(self.db)
         weights = load_condition_weights(self.db)
-        race_groups = group_by_race(self.fetch_race_targets())
+        target_ids = set(race_ids)
+        race_groups = {
+            race_id: rows for race_id, rows in group_by_race(self.fetch_race_targets()).items()
+            if race_id in target_ids
+        }
 
         stats = {
             "total": 0, "with_data": 0, "no_style_data": 0, "no_condition_weight": 0,
@@ -162,11 +166,18 @@ class KyakushitsuPowerFeatureBuilder:
                 stats["with_data"] += 1
                 stats["style_counts"][style] += 1
 
-        log(f"完了: 総件数={stats['total']} 算出={stats['with_data']} "
+        log(f"完了: 対象レース数={len(target_ids)} 総件数={stats['total']} 算出={stats['with_data']} "
             f"脚質推定不可={stats['no_style_data']} 重みマスターなし={stats['no_condition_weight']} "
             f"内訳={stats['style_counts']}")
 
         return stats
+
+    def build(self, log=print):
+        """entriesテーブルにある全レースについて脚質区分を推定し、
+        condition_weightsの該当区分の重み値をkyakushitsu_powerとして保存する
+        （他の7項目と異なりレース内正規化は行わない）"""
+        all_race_ids = list(group_by_race(self.fetch_race_targets()).keys())
+        return self.build_for_races(all_race_ids, log=log)
 
 
 if __name__ == "__main__":

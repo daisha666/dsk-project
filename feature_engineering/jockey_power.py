@@ -91,12 +91,16 @@ class JockeyPowerFeatureBuilder:
             ORDER BY r.race_date, r.round
         """)
 
-    def build(self, log=print):
-        """entriesテーブルにある全レースについて、レース内で騎手力を
-        Min-Max正規化し、condition_weights.weight_jockeyを掛けて保存する"""
+    def build_for_races(self, race_ids, log=print):
+        """指定したrace_idだけについて、騎手力を再計算・保存する
+        （automation/denma_predict_job.pyのような新規レース向けの差分計算用）"""
         histories = load_entity_histories("jockey", self.db)
         weights = load_condition_weights(self.db)
-        race_groups = group_by_race(self.fetch_race_targets())
+        target_ids = set(race_ids)
+        race_groups = {
+            race_id: rows for race_id, rows in group_by_race(self.fetch_race_targets()).items()
+            if race_id in target_ids
+        }
 
         stats = {"total": 0, "with_data": 0, "no_data": 0, "no_condition_weight": 0}
 
@@ -127,10 +131,16 @@ class JockeyPowerFeatureBuilder:
                 self.save_feature(race_id, horse_id, norm_value * weight_row["jockey"])
                 stats["with_data"] += 1
 
-        log(f"完了: 総件数={stats['total']} 算出={stats['with_data']} "
+        log(f"完了: 対象レース数={len(target_ids)} 総件数={stats['total']} 算出={stats['with_data']} "
             f"騎手データなし={stats['no_data']} 重みマスターなし={stats['no_condition_weight']}")
 
         return stats
+
+    def build(self, log=print):
+        """entriesテーブルにある全レースについて、レース内で騎手力を
+        Min-Max正規化し、condition_weights.weight_jockeyを掛けて保存する"""
+        all_race_ids = list(group_by_race(self.fetch_race_targets()).keys())
+        return self.build_for_races(all_race_ids, log=log)
 
 
 if __name__ == "__main__":

@@ -57,12 +57,18 @@ class AgariPowerFeatureBuilder:
             ORDER BY r.race_date, e.race_id
         """)
 
-    def build(self, log=print):
-        """entriesテーブルにある全レースについて、レース内で上がり力を
-        Min-Max正規化（反転）し、condition_weights.weight_agariを掛けて保存する"""
+    def build_for_races(self, race_ids, log=print):
+        """指定したrace_idだけについて、上がり力を再計算・保存する
+        （automation/denma_predict_job.pyのような新規レース向けの差分計算用。
+        build()と違い、対象を絞ってからループするだけで、履歴の読み込み・
+        正規化ロジック自体はbuild()と同じものを使う）"""
         histories = load_horse_histories(self.db)
         weights = load_condition_weights(self.db)
-        race_groups = group_by_race(self.fetch_race_targets())
+        target_ids = set(race_ids)
+        race_groups = {
+            race_id: rows for race_id, rows in group_by_race(self.fetch_race_targets()).items()
+            if race_id in target_ids
+        }
 
         stats = {"total": 0, "with_data": 0, "no_data": 0, "no_condition_weight": 0}
 
@@ -93,10 +99,16 @@ class AgariPowerFeatureBuilder:
                 self.save_feature(race_id, horse_id, norm_value * weight_row["agari"])
                 stats["with_data"] += 1
 
-        log(f"完了: 総件数={stats['total']} 算出={stats['with_data']} "
+        log(f"完了: 対象レース数={len(target_ids)} 総件数={stats['total']} 算出={stats['with_data']} "
             f"上がりデータなし={stats['no_data']} 重みマスターなし={stats['no_condition_weight']}")
 
         return stats
+
+    def build(self, log=print):
+        """entriesテーブルにある全レースについて、レース内で上がり力を
+        Min-Max正規化（反転）し、condition_weights.weight_agariを掛けて保存する"""
+        all_race_ids = list(group_by_race(self.fetch_race_targets()).keys())
+        return self.build_for_races(all_race_ids, log=log)
 
 
 if __name__ == "__main__":
