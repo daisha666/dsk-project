@@ -8,5 +8,8 @@ database/dsk_project.db
 # 頻繁に再学習する段階のため、バイナリをリポジトリに含めない）
 model/*.pkl
 
+# predict_race.pyの出力（実行のたびに再生成される中間ファイル）
+output/predictions_latest.json
+
 __pycache__/
 *.pyc

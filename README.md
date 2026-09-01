@@ -57,7 +57,32 @@ GASベースの「競馬予想2」で得られた知見――**オッズを反�
 - [x] 期待値ベースの購入判定・回収率バックテスト（`ai/backtest.py`。EV閾値・オッズ上限フィルタで
       大穴バイアスに対処するPROJECT_EVと同じ設計。的中時の払戻額は必ず確定`payouts`テーブルを使い、
       発走前オッズ（`entries.odds`）のスナップショットは購入判定にのみ使う）
-- [ ] ハイパーパラメータチューニング・EV閾値/オッズ上限の最適化（PROJECT_EVのsharpe_ratio_analysis.py相当）
+- [x] **Stage3基準値を確定**（下記「Stage3としての基準値（確定）」参照）。EV閾値・オッズ上限の
+      これ以上のピンポイント最適化は打ち止めとし、今後は実運用で蓄積する実データで継続検証する方針
+- [x] 実際の予想・購入判定スクリプト（`prediction/predict_race.py`。PROJECT_EVの
+      `prediction/predict_race.py`相当）。未確定レースを毎回最新の全履歴データで学習した
+      モデルA'で予測し、印（◎○▲△☆、`odds_adjusted_rank`基準）・買い目推奨を出力する
+- [ ] Google Sheets連携（操作パネル・検証結果の2タブ）
+- [ ] GitHub Pagesアプリ
+
+## Stage3としての基準値（確定）
+
+一連の検証（`ai/model_a_odds_adjusted_ablation.py` → `ai/stage3_stability_recheck.py`
+→ `ai/model_a_odds_adjusted_grid_search.py` → `ai/model_a_odds_adjusted_holdout_validation.py`）
+を経て、以下をStage3の基準値として確定した（`prediction/predict_race.py`が使用）。
+
+| 項目 | 確定値 |
+|---|---|
+| モデル | モデルA'（`overall_score` + `odds_adjusted_score` + 市場情報〈オッズ・人気〉を特徴量に持つLightGBM） |
+| EV閾値 | **1.4**（1.3〜1.5の帯の中央寄り。ピンポイントの最適値ではなく帯の代表値） |
+| オッズ上限 | **30倍**（25〜30倍の帯の上限寄り） |
+| クラスフィルタ | 1勝クラス以上限定（新馬戦・未勝利戦は買い目推奨の対象外。スコア自体は表示する） |
+
+ホールドアウト検証（`ai/model_a_odds_adjusted_holdout_validation.py`）で、グリッドサーチが
+選ぶ「点」としての最適値（EV1.30・上限25倍やEV1.50・上限25倍）はフォールドの選び方で
+入れ替わり、単独では信頼できないことを確認済み。そのため**ピンポイントではなく帯として
+運用し、これ以上の微調整は机上のバックテストでは行わない**（ユーザー確定事項）。今後の
+精緻化は実運用で蓄積する実データでの継続検証に委ねる。
 
 ## データ・検証結果
 

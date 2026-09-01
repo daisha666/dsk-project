@@ -35,6 +35,12 @@ class DskProject:
 
             "feature_engineering",
 
+            "ai",
+
+            "analysis",
+
+            "prediction",
+
             "model",
 
             "config",

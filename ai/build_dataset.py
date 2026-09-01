@@ -124,6 +124,43 @@ QUERY = """
     ORDER BY r.race_date, e.race_id, e.horse_number
 """
 
+# build_dataset()と同じ列だが、まだ結果が確定していない（＝これから予測したい）
+# レースだけに絞り込む。prediction/predict_race.py専用
+UPCOMING_QUERY = """
+    SELECT
+        e.race_id,
+        e.horse_id,
+        h.horse_name,
+        r.race_date,
+        r.course,
+        r.round,
+        r.distance,
+        r.surface,
+        r.track_condition,
+        r.race_class,
+        r.direction,
+        r.age_condition,
+        e.horse_number,
+        e.frame_number,
+        e.sex_age,
+        e.weight,
+        e.odds AS market_odds,
+        e.popularity AS market_popularity,
+        f.overall_score,
+        f.odds_adjusted_score,
+        f.raw_rank,
+        f.odds_adjusted_rank,
+        f.stability_power
+    FROM entries e
+    JOIN races r ON r.race_id = e.race_id
+    JOIN horses h ON h.horse_id = e.horse_id
+    JOIN features f ON f.race_id = e.race_id AND f.horse_id = e.horse_id
+    WHERE e.race_id NOT IN (
+        SELECT DISTINCT race_id FROM results WHERE finish_position IS NOT NULL
+    )
+    ORDER BY r.race_date, e.race_id, e.horse_number
+"""
+
 
 def build_dataset(db=None):
     """学習用データセットをpandas DataFrameとして返す（分割は行わない）。
@@ -151,6 +188,46 @@ def build_dataset(db=None):
         df[col] = df[col].astype("category")
 
     df.attrs["excluded_no_result"] = excluded_no_result
+    df.attrs["excluded_debut_races"] = excluded_debut_races
+    df.attrs["total_races_before_debut_filter"] = total_races_before_debut_filter
+
+    return df
+
+
+def build_upcoming_dataset(db=None):
+    """まだ結果が確定していないレースを、build_dataset()と同じ特徴量の形で
+    pandas DataFrameとして返す（labelは無い。予測対象を作るための関数）。
+    build_dataset()と同じ理由で、出走馬全員が過去走データなしのレース
+    （新馬戦等）は除外する。raw_rank・odds_adjusted_rankは特徴量としては
+    使わないが、アプリ表示用に残す（prediction/predict_race.py参照）"""
+    if db is None:
+        db = DatabaseManager()
+
+    conn = db.connect()
+    df = pd.read_sql_query(UPCOMING_QUERY, conn)
+    conn.close()
+
+    # 未確定レースが1件も無い場合（開催間の谷間・全レース終了直後等）に
+    # 早期リターンする。0行のDataFrameに対してgroupby().transform()すると
+    # pandasが列を落とすことがあり、後段のdrop(columns=["stability_power"])が
+    # KeyErrorになるため
+    if len(df) == 0:
+        df = df.drop(columns=["stability_power"])
+        for col in CATEGORICAL_COLUMNS:
+            df[col] = df[col].astype("category")
+        df.attrs["excluded_debut_races"] = 0
+        df.attrs["total_races_before_debut_filter"] = 0
+        return df
+
+    total_races_before_debut_filter = df["race_id"].nunique()
+    race_all_debut = df.groupby("race_id")["stability_power"].transform(lambda s: s.isna().all())
+    excluded_debut_races = df.loc[race_all_debut, "race_id"].nunique()
+    df = df[~race_all_debut].copy()
+    df = df.drop(columns=["stability_power"])
+
+    for col in CATEGORICAL_COLUMNS:
+        df[col] = df[col].astype("category")
+
     df.attrs["excluded_debut_races"] = excluded_debut_races
     df.attrs["total_races_before_debut_filter"] = total_races_before_debut_filter
 
