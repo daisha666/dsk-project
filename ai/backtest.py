@@ -54,6 +54,53 @@ STAKE = 100  # 単勝1点あたりの購入額（円）。payouts.payout_yenは1
 EV_THRESHOLDS = [1.20, 1.50, 2.00]
 ODDS_CAPS = [None, 50, 30]
 
+# クラス帯判定（PROJECT_EVのanalysis/similar_races.py::classify_class_tierと同じロジック。
+# races.race_classの表記はdsk_ProjectもYahoo競馬由来で同一フォーマットのため、そのまま流用できる）
+EXCLUDED_CLASS_TIERS = {"新馬", "未勝利"}
+
+
+def classify_class_tier(race_class):
+    """race_class（TEXT、表記揺れあり）から大まかなクラス帯を判定する。
+    G1/G2/G3/リステッド/オープン/勝ち星クラス/未勝利/新馬 に分類する"""
+    if not race_class or (isinstance(race_class, float) and pd.isna(race_class)):
+        return None
+
+    if race_class.startswith(("GI ", "JpnI ")):
+        return "G1"
+    if race_class.startswith(("GII ", "JpnII ")):
+        return "G2"
+    if race_class.startswith(("GIII ", "JpnIII ")):
+        return "G3"
+    if race_class.startswith("L "):
+        return "リステッド"
+    if "3勝クラス" in race_class:
+        return "3勝クラス"
+    if "2勝クラス" in race_class:
+        return "2勝クラス"
+    if "1勝クラス" in race_class:
+        return "1勝クラス"
+    if "新馬" in race_class:
+        return "新馬"
+    if "未勝利" in race_class:
+        return "未勝利"
+    if "オープン" in race_class:
+        return "オープン"
+    return "その他"
+
+
+def is_class_included(race_class):
+    """1勝クラス以上（新馬・未勝利を除く）ならTrue"""
+    return classify_class_tier(race_class) not in EXCLUDED_CLASS_TIERS
+
+
+def select_top1_per_race(candidates):
+    """レースごとにexpected_valueが最大の1頭だけを残す
+    （同値の場合は予測確率が高い方を採用。それも同値ならDataFrame内の出現順で先頭）"""
+    if len(candidates) == 0:
+        return candidates
+    sorted_c = candidates.sort_values(["expected_value", "pred_win_prob"], ascending=[False, False])
+    return sorted_c.drop_duplicates(subset="race_id", keep="first")
+
 
 def fetch_win_payouts(db=None):
     """確定払戻金テーブル（payouts）から単勝の {(race_id, horse_number): payout_yen} を返す。
@@ -106,7 +153,9 @@ def score_fold_with_market(dataset, test_start, test_end, feature_columns, categ
     model = train_model(train_df, feature_columns, categorical_columns)
     proba, y_test, auc, logloss = evaluate_model(model, test_df, feature_columns)
 
-    result = test_df.loc[:, ["race_id", "horse_id", "horse_name", "race_date", "horse_number", "market_odds"]].copy()
+    result = test_df.loc[:, [
+        "race_id", "horse_id", "horse_name", "race_date", "horse_number", "market_odds", "race_class",
+    ]].copy()
     result["label"] = y_test.values
     result["pred_win_prob"] = proba
     result["expected_value"] = result["pred_win_prob"] * result["market_odds"]
@@ -121,12 +170,20 @@ def score_fold_with_market(dataset, test_start, test_end, feature_columns, categ
     return result, auc, logloss
 
 
-def simulate(df, ev_threshold, stake=STAKE, odds_cap=None, min_pred_prob=None):
+def simulate(df, ev_threshold, stake=STAKE, odds_cap=None, min_pred_prob=None,
+             class_filter=False, top1=False):
     """期待値がev_threshold以上、（odds_capを指定した場合は）market_oddsが
     odds_cap以下、（min_pred_probを指定した場合は）pred_win_probが
     min_pred_prob以上の馬を単勝均等購入した場合の回収成績を計算する。
     購入判定（絞り込み）にはmarket_odds（発走前オッズ）を使うが、的中時の
-    払戻額は必ずconfirmed_payout_yen（確定払戻金）を使う"""
+    払戻額は必ずconfirmed_payout_yen（確定払戻金）を使う。
+
+    class_filter=True: 新馬戦・未勝利戦を除外し、1勝クラス以上のレースだけを
+      購入対象にする（PROJECT_EVのai/class_filter_backtest.pyと同じ）。
+      モデルの学習データ自体は変えず、あくまで購入判定時の絞り込みとして適用する。
+    top1=True: 同一レースで複数の推奨馬（EV閾値・オッズ上限を満たす馬）がいる
+      場合、期待値が最大の1頭だけを購入する（PROJECT_EVのai/top1_ev_backtest.py
+      と同じ。同値ならpred_win_probが高い方を採用）"""
     candidates = df[df["expected_value"] >= ev_threshold]
 
     if odds_cap is not None:
@@ -134,6 +191,12 @@ def simulate(df, ev_threshold, stake=STAKE, odds_cap=None, min_pred_prob=None):
 
     if min_pred_prob is not None:
         candidates = candidates[candidates["pred_win_prob"] >= min_pred_prob]
+
+    if class_filter:
+        candidates = candidates[candidates["race_class"].apply(is_class_included)]
+
+    if top1:
+        candidates = select_top1_per_race(candidates)
 
     buys = candidates
 
@@ -155,6 +218,7 @@ def simulate(df, ev_threshold, stake=STAKE, odds_cap=None, min_pred_prob=None):
         "オッズ上限": odds_cap if odds_cap is not None else "なし",
         "EV閾値": ev_threshold,
         "買い件数": n_buys,
+        "買い対象レース数": buys["race_id"].nunique(),
         "的中数": n_hits,
         "的中率(%)": hit_rate * 100 if n_buys > 0 else np.nan,
         "総購入額(円)": total_stake,
