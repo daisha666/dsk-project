@@ -124,7 +124,11 @@ def ensure_verification_sheet(sh, log=print):
     ws = sh.add_worksheet(title=VERIFICATION_SHEET_NAME, rows=HISTORY_START_ROW + MAX_CHART_ROWS, cols=30)
     log(f"「{VERIFICATION_SHEET_NAME}」シートを新規作成")
     _write_layout_headers(ws)
-    ws.freeze(rows=CUMULATIVE_TITLE_ROW - 1)
+    # 行固定（freeze）をグラフのすぐ上/重なる範囲まで効かせると、フローティング
+    # オブジェクトであるグラフの描画位置が固定行の境界に引きずられて実際の
+    # anchorCellと異なる位置にずれる事象が起きたため、固定は設定ブロックの
+    # みにとどめる（グラフの手前で止め、グラフの領域には掛けない）
+    ws.freeze(rows=len(SETTINGS_BLOCK))
 
     return ws
 
