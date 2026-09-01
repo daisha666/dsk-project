@@ -154,7 +154,8 @@ def score_fold_with_market(dataset, test_start, test_end, feature_columns, categ
     proba, y_test, auc, logloss = evaluate_model(model, test_df, feature_columns)
 
     result = test_df.loc[:, [
-        "race_id", "horse_id", "horse_name", "race_date", "horse_number", "market_odds", "race_class",
+        "race_id", "horse_id", "horse_name", "race_date", "horse_number",
+        "market_odds", "market_popularity", "race_class",
     ]].copy()
     result["label"] = y_test.values
     result["pred_win_prob"] = proba
