@@ -250,6 +250,38 @@ def run_model_backtest(dataset, folds, feature_columns, categorical_columns, win
     return pd.concat(all_results, ignore_index=True)
 
 
+def compute_sharpe_ratio(fold_recoveries):
+    """フォールド別回収率のリスト（%表記、100=収支トントン）から、
+    シャープレシオ = (平均回収率 - 100) ÷ 回収率の標準偏差 を計算する
+    （PROJECT_EVのai/backtest.py::compute_sharpe_ratioと同じ定義。
+    フォールド間のばらつきをリスクとして扱う簡易版）。
+    標準偏差はサンプル標準偏差（ddof=1、少数フォールドからの推定のため）。
+    有効なサンプルが2件未満、または標準偏差が0の場合はnanを返す"""
+    values = np.array([v for v in fold_recoveries if v is not None and not np.isnan(v)], dtype=float)
+    if len(values) < 2:
+        return np.nan
+    std = values.std(ddof=1)
+    if std == 0:
+        return np.nan
+    return (values.mean() - 100) / std
+
+
+def simulate_per_fold(df, folds, ev_threshold, odds_cap=None, min_pred_prob=None, class_filter=False, top1=False):
+    """フォールドごとのrace_date範囲でdfを区切り、simulate()をそれぞれ適用して
+    フォールド別結果（simulate()の戻り値の辞書）のリストを返す。
+    件数0件のフォールドは回収率nanのまま含める（compute_sharpe_ratioが除外する）"""
+    fold_results = []
+    for test_start, test_end in folds:
+        sub = df[(df["race_date"] >= test_start) & (df["race_date"] <= test_end)]
+        result = simulate(
+            sub, ev_threshold, odds_cap=odds_cap, min_pred_prob=min_pred_prob,
+            class_filter=class_filter, top1=top1,
+        )
+        result["テスト期間"] = f"{test_start}〜{test_end}"
+        fold_results.append(result)
+    return fold_results
+
+
 def main():
     print("=" * 40)
     print("dsk_Project")
