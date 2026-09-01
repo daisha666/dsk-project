@@ -62,8 +62,25 @@ GASベースの「競馬予想2」で得られた知見――**オッズを反�
 - [x] 実際の予想・購入判定スクリプト（`prediction/predict_race.py`。PROJECT_EVの
       `prediction/predict_race.py`相当）。未確定レースを毎回最新の全履歴データで学習した
       モデルA'で予測し、印（◎○▲△☆、`odds_adjusted_rank`基準）・買い目推奨を出力する
-- [ ] Google Sheets連携（操作パネル・検証結果の2タブ）
-- [ ] GitHub Pagesアプリ
+- [x] 実運用の予測ログ（`predictions`テーブル）と確定結果を突き合わせる実データ検証
+      （`analysis/prediction_verification.py`。机上バックテストではなく、実際に運用しながら
+      蓄積されるデータで継続検証していく仕組み）
+- [x] GitHub Pagesアプリ（`docs/`。https://daisha666.github.io/dsk-project/ で公開。
+      `predict_race.py`が書き出す`docs/data/predictions.json`を読み込み、買い目推奨・
+      全馬スコア一覧〈素点順位・オッズ後順位を両方表示〉を表示する単一HTML/JSページ）
+- [ ] **Google Sheets連携（操作パネル・検証結果の2タブ）— コードは実装済みだがユーザー側の
+      一度きりの作業待ち**。サービスアカウントは自分自身のDriveストレージを持たず新規
+      スプレッドシートを作成できないため（`prediction/sheets_report.py`参照）、
+      ①ユーザーが「dsk_Project」という名前でGoogle Sheetsを作成し、②サービスアカウント
+      （`project-ev-sheets@plenary-ellipse-433307-u6.iam.gserviceaccount.com`、
+      PROJECT_EVと共通）を編集者として共有し、③そのスプレッドシートIDを
+      `automation/sheet_config.py`のSPREADSHEET_IDに設定する、の3ステップが必要
+- [ ] **既知の運用課題**: `feature_engineering/`の8項目パイプラインは全件を毎回フル再計算する
+      設計（約7時間、Stage1「既知の課題」参照）。`automation/denma_predict_job.py`が新規に
+      出馬表を保存しても、8項目・overall_score・odds_adjusted_scoreの再計算を別途フルで
+      走らせない限り`predict_race.py`はその新規レースをスコアできない（`features`テーブルとの
+      INNER JOINで単に対象外になる）。実運用を本格化するには、新規race_idだけを対象にした
+      差分計算に各builderを対応させる改修が必要
 
 ## Stage3としての基準値（確定）
 
