@@ -34,16 +34,27 @@ def run_denma_predict_job(log=print):
         "スコアできない点に注意。事前に8項目パイプラインの実行が必要）")
 
     from prediction.predict_race import (
-        export_predictions,
+        CLASS_FILTER,
+        EV_THRESHOLD,
+        ODDS_CAP,
         save_predictions_to_db,
         score_upcoming_races,
         train_current_model,
     )
+    from prediction.generate_report import generate_site
+    import pandas as pd
 
     model = train_current_model(log=log)
     scored = score_upcoming_races(model, log=log)
-    export_predictions(scored)
     n_saved = save_predictions_to_db(scored)
+
+    settings = {"ev_threshold": EV_THRESHOLD, "odds_cap": ODDS_CAP, "class_filter": CLASS_FILTER}
+    generated_at = pd.Timestamp.now().isoformat()
+    generate_site(scored, settings, generated_at, log=log)
+
+    log("GitHub Pagesへデプロイ")
+    from automation.git_deploy import deploy_docs
+    deploy_docs(log=log)
 
     return f"出馬表{collect_stats['races_saved']}レース保存、予測{n_saved}件保存"
 
