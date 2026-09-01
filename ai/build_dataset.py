@@ -37,8 +37,18 @@ PROJECT_EVとの最大の違い（本プロジェクトの主眼）:
     比較をしたくなったら別途アブレーション用のFEATURE_COLUMNSを追加する）
   - raw_rank / odds_adjusted_rank: いずれもレース内順位というoverall_score /
     オッズの単なる並べ替えであり、oddsを含むmarket_columnsと同様の
-    リーク経路になり得るため、市場情報あり/なしどちらのモデルにも含めない
-    （odds_adjusted_rankはオッズそのものから作られる値のため特に注意）
+    リーク経路になり得るため、標準のFEATURE_COLUMNS / BASE_FEATURE_COLUMNSには
+    含めない（odds_adjusted_rankはオッズそのものから作られる値のため特に注意）
+
+odds_adjusted_score列について（ai/model_a_odds_adjusted_ablation.py用）:
+  QUERYにはf.odds_adjusted_score（overall_score×(1/オッズ)×係数、開発指示書2.3の
+  「AK列」相当）を含めているが、上記の理由によりFEATURE_COLUMNS /
+  BASE_FEATURE_COLUMNSには含めていない。ただしモデルA（市場情報あり）は
+  そもそもmarket_oddsを特徴量として持っているため、モデルAに限っては
+  odds_adjusted_scoreを追加してもmarket_odds由来の新たなリークにはならない
+  （overall_scoreとmarket_oddsという既存の2特徴量から決定的に導出される値を
+  明示的な特徴量として渡すだけ）。この検証専用にFEATURE_COLUMNS_A_ODDS_ADJUSTED
+  を用意している。
 """
 
 import sys
@@ -78,6 +88,10 @@ BASE_FEATURE_COLUMNS = CATEGORICAL_COLUMNS + [
 # 市場情報を含めた特徴量（本プロジェクトの主眼となるモデル）
 FEATURE_COLUMNS = BASE_FEATURE_COLUMNS + MARKET_COLUMNS
 
+# 検証専用: モデルA（市場情報あり）にodds_adjusted_scoreを追加したもの
+# （ai/model_a_odds_adjusted_ablation.py参照）
+FEATURE_COLUMNS_A_ODDS_ADJUSTED = FEATURE_COLUMNS + ["odds_adjusted_score"]
+
 QUERY = """
     SELECT
         e.race_id,
@@ -99,6 +113,7 @@ QUERY = """
         e.odds AS market_odds,
         e.popularity AS market_popularity,
         f.overall_score,
+        f.odds_adjusted_score,
         f.stability_power,
         res.finish_position
     FROM entries e
