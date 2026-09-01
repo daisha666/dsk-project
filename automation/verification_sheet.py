@@ -52,33 +52,35 @@ YEN_FORMAT = {"numberFormat": {"type": "NUMBER", "pattern": '#,##0"円"'}}
 SUMMARY_HEADER = ["対象予測数(結果確定済み)", "買い目推奨数", "的中数", "的中率(%)",
                    "総購入額(円)", "総払戻額(円)", "回収率(%)", "払戻欠損"]
 
+# ---- グラフ（回収率推移）。列方向のオフセットで表の右側に置く方式は、列幅の
+#      実際のレンダリング次第で表と重なる事故があった（ユーザー報告）ため
+#      A列に統一し、行方向も「下の表の下」（表が育つと追いつかれる懸念が
+#      ユーザーからあった）ではなく、常に一定サイズの本グラフを先頭
+#      （Stage3確定基準のすぐ下）に固定し、増減する各表はその下に置く方式にした ----
+CHART_TITLE_ROW = len(SETTINGS_BLOCK) + 1  # 7
+CHART_ANCHOR_ROW = CHART_TITLE_ROW  # 0-indexedのrowIndexとしてそのまま使う（1行分のズレでちょうど良い）
+CHART_ANCHOR_COL_INDEX = 0  # A列
+CHART_ROW_SPAN = 20  # 380pxのグラフ高さ（既定の行高21px換算で約18行）を収める余裕
+
 # ---- 累積成績サマリー ----
-CUMULATIVE_TITLE_ROW = len(SETTINGS_BLOCK) + 1  # 7
-CUMULATIVE_HEADER_ROW = CUMULATIVE_TITLE_ROW + 1  # 8
-CUMULATIVE_DATA_ROW = CUMULATIVE_HEADER_ROW + 1  # 9
+CUMULATIVE_TITLE_ROW = CHART_TITLE_ROW + CHART_ROW_SPAN + 2  # 29
+CUMULATIVE_HEADER_ROW = CUMULATIVE_TITLE_ROW + 1  # 30
+CUMULATIVE_DATA_ROW = CUMULATIVE_HEADER_ROW + 1  # 31
 
 # ---- 今回（直近）の成績 ----
-RECENT_TITLE_ROW = CUMULATIVE_DATA_ROW + 2  # 11
-RECENT_HEADER_ROW = RECENT_TITLE_ROW + 1  # 12
-RECENT_DATA_ROW = RECENT_HEADER_ROW + 1  # 13
+RECENT_TITLE_ROW = CUMULATIVE_DATA_ROW + 2  # 33
+RECENT_HEADER_ROW = RECENT_TITLE_ROW + 1  # 34
+RECENT_DATA_ROW = RECENT_HEADER_ROW + 1  # 35
 
 # ---- 月別成績 ----
-MONTHLY_TITLE_ROW = RECENT_DATA_ROW + 2  # 15
-MONTHLY_HEADER_ROW = MONTHLY_TITLE_ROW + 1  # 16
-MONTHLY_DATA_START_ROW = MONTHLY_HEADER_ROW + 1  # 17
+MONTHLY_TITLE_ROW = RECENT_DATA_ROW + 2  # 37
+MONTHLY_HEADER_ROW = MONTHLY_TITLE_ROW + 1  # 38
+MONTHLY_DATA_START_ROW = MONTHLY_HEADER_ROW + 1  # 39
 MONTHLY_HEADER = ["年月"] + SUMMARY_HEADER
 MONTHLY_MAX_ROWS = 40  # 3年強分の余裕（運用しながら足りなくなれば拡張する）
 
-# ---- グラフ（回収率推移。列方向のオフセットで表の右側に置く方式は、列幅の
-#      実際のレンダリング次第で表と重なる事故があったため、表の下の専用の
-#      空き行ブロックに配置する方式にした） ----
-CHART_TITLE_ROW = MONTHLY_DATA_START_ROW + MONTHLY_MAX_ROWS + 1  # 58
-CHART_ANCHOR_ROW = CHART_TITLE_ROW  # 0-indexedのrowIndexとしてそのまま使う（1行分のズレでちょうど良い）
-CHART_ANCHOR_COL_INDEX = 0  # A列。グラフ専用の行ブロックなので列は重ならない
-CHART_ROW_SPAN = 20  # 380pxのグラフ高さ（既定の行高21px換算で約18行）を収める余裕
-
 # ---- 実行履歴（グラフ用データ） ----
-HISTORY_TITLE_ROW = CHART_TITLE_ROW + CHART_ROW_SPAN + 1  # 79
+HISTORY_TITLE_ROW = MONTHLY_DATA_START_ROW + MONTHLY_MAX_ROWS + 1  # 80
 HISTORY_HEADER_ROW = HISTORY_TITLE_ROW + 1  # 80
 HISTORY_START_ROW = HISTORY_HEADER_ROW + 1  # 81
 HISTORY_HEADER = ["更新日時", "対象予測数(結果確定済み)", "買い目推奨数", "的中数",
@@ -125,6 +127,9 @@ def ensure_verification_sheet(sh, log=print):
 def _write_layout_headers(ws):
     ws.update(SETTINGS_BLOCK, "A1", value_input_option="USER_ENTERED")
 
+    ws.update([["■ 回収率(%)の推移グラフ"]], f"A{CHART_TITLE_ROW}")
+    ws.format(f"A{CHART_TITLE_ROW}", TITLE_FORMAT)
+
     ws.update([["■ 累積成績サマリー（結果確定済みの全予測ログが対象）"]], f"A{CUMULATIVE_TITLE_ROW}")
     ws.format(f"A{CUMULATIVE_TITLE_ROW}", TITLE_FORMAT)
     ws.update([SUMMARY_HEADER], f"A{CUMULATIVE_HEADER_ROW}", value_input_option="USER_ENTERED")
@@ -139,9 +144,6 @@ def _write_layout_headers(ws):
     ws.format(f"A{MONTHLY_TITLE_ROW}", TITLE_FORMAT)
     ws.update([MONTHLY_HEADER], f"A{MONTHLY_HEADER_ROW}", value_input_option="USER_ENTERED")
     ws.format(f"A{MONTHLY_HEADER_ROW}:I{MONTHLY_HEADER_ROW}", HEADER_FORMAT)
-
-    ws.update([["■ 回収率(%)の推移グラフ"]], f"A{CHART_TITLE_ROW}")
-    ws.format(f"A{CHART_TITLE_ROW}", TITLE_FORMAT)
 
     ws.update([["■ 実行履歴（上記グラフの元データ。実行のたびに1行追記）"]], f"A{HISTORY_TITLE_ROW}")
     ws.format(f"A{HISTORY_TITLE_ROW}", TITLE_FORMAT)
