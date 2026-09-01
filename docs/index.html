@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>dsk_Project 予想</title>
+<style>
+  :root {
+    --bg: #0f1420;
+    --panel: #171e2e;
+    --panel-alt: #1f2838;
+    --border: #2a3448;
+    --text: #e8ecf4;
+    --text-dim: #93a0b8;
+    --accent: #5aa9ff;
+    --good: #4cd07d;
+    --warn: #ffb347;
+    --bad: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Hiragino Sans", "Yu Gothic", -apple-system, BlinkMacSystemFont, sans-serif;
+    padding: 16px;
+  }
+  header {
+    max-width: 960px;
+    margin: 0 auto 20px;
+  }
+  h1 {
+    font-size: 1.4rem;
+    margin: 0 0 4px;
+  }
+  .subtitle {
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    margin: 0 0 12px;
+  }
+  .settings-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 0.78rem;
+  }
+  .settings-bar span {
+    background: var(--panel-alt);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 4px 10px;
+    color: var(--text-dim);
+  }
+  main {
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  .empty-state {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 32px 20px;
+    text-align: center;
+    color: var(--text-dim);
+  }
+  .race-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .race-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+  .race-title {
+    font-weight: 600;
+    font-size: 1.05rem;
+  }
+  .race-meta {
+    color: var(--text-dim);
+    font-size: 0.82rem;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+  }
+  th, td {
+    padding: 6px 6px;
+    text-align: right;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  th:nth-child(1), td:nth-child(1),
+  th:nth-child(3), td:nth-child(3) {
+    text-align: center;
+  }
+  th:nth-child(2), td:nth-child(2) {
+    text-align: left;
+  }
+  th {
+    color: var(--text-dim);
+    font-weight: 500;
+    font-size: 0.72rem;
+  }
+  .mark {
+    font-size: 1rem;
+  }
+  .recommended-row {
+    background: rgba(76, 208, 125, 0.08);
+  }
+  .badge-buy {
+    display: inline-block;
+    background: var(--good);
+    color: #05210f;
+    font-weight: 700;
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 0.7rem;
+  }
+  .table-scroll {
+    overflow-x: auto;
+  }
+  .recommend-summary {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 20px;
+  }
+  .recommend-summary h2 {
+    font-size: 1rem;
+    margin: 0 0 10px;
+  }
+  .recommend-item {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.85rem;
+  }
+  .recommend-item:last-child { border-bottom: none; }
+  .recommend-item .odds {
+    color: var(--warn);
+    white-space: nowrap;
+  }
+  footer {
+    max-width: 960px;
+    margin: 24px auto 0;
+    color: var(--text-dim);
+    font-size: 0.72rem;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>dsk_Project 予想</h1>
+  <p class="subtitle">オッズを反映した最終指数（AK列相当）で印を決定する投資型競馬AI</p>
+  <div class="settings-bar" id="settings-bar"></div>
+</header>
+
+<main id="main">
+  <div class="empty-state">読み込み中...</div>
+</main>
+
+<footer>
+  <p>素点順位＝overall_scoreのレース内順位（オッズ反映前） / オッズ後順位＝odds_adjusted_scoreのレース内順位（印の基準）</p>
+  <p><a href="https://github.com/daisha666/dsk-project" style="color:var(--accent)">daisha666/dsk-project</a></p>
+</footer>
+
+<script>
+const MARK_COLORS = {"◎": "#ff6b6b", "○": "#ffb347", "▲": "#5aa9ff", "△": "#4cd07d", "☆": "#c084fc"};
+
+function fmtPct(v) {
+  return (v * 100).toFixed(1) + "%";
+}
+
+function renderSettings(settings, generatedAt) {
+  const bar = document.getElementById("settings-bar");
+  const items = [
+    `EV閾値 >= ${settings.ev_threshold}`,
+    `オッズ上限 ${settings.odds_cap}倍`,
+    settings.class_filter ? "1勝クラス以上限定" : "全クラス対象",
+    `更新: ${generatedAt ? new Date(generatedAt).toLocaleString("ja-JP") : "-"}`,
+  ];
+  bar.innerHTML = items.map(t => `<span>${t}</span>`).join("");
+}
+
+function renderRecommendSummary(races) {
+  const picks = [];
+  races.forEach(race => {
+    race.horses.forEach(h => {
+      if (h.is_recommended) {
+        picks.push({ race, horse: h });
+      }
+    });
+  });
+
+  if (picks.length === 0) return "";
+
+  const items = picks
+    .sort((a, b) => b.horse.expected_value - a.horse.expected_value)
+    .map(({ race, horse }) => `
+      <div class="recommend-item">
+        <span>${race.race_date} ${race.course}${race.round}R ${horse.horse_number}番 ${horse.horse_name}</span>
+        <span class="odds">EV ${horse.expected_value.toFixed(2)} / ${horse.market_odds != null ? horse.market_odds.toFixed(1) + "倍" : "-"}</span>
+      </div>
+    `).join("");
+
+  return `
+    <div class="recommend-summary">
+      <h2>買い目推奨（${picks.length}点）</h2>
+      ${items}
+    </div>
+  `;
+}
+
+function renderRaceCard(race) {
+  const rows = race.horses.map(h => `
+    <tr class="${h.is_recommended ? "recommended-row" : ""}">
+      <td class="mark" style="color:${MARK_COLORS[h.mark] || "inherit"}">${h.mark || ""}</td>
+      <td>${h.horse_number}番 ${h.horse_name}</td>
+      <td>${h.raw_rank ?? "-"}</td>
+      <td>${h.odds_adjusted_rank ?? "-"}</td>
+      <td>${h.market_odds != null ? h.market_odds.toFixed(1) : "-"}</td>
+      <td>${h.market_popularity ?? "-"}</td>
+      <td>${fmtPct(h.pred_win_prob)}</td>
+      <td>${h.expected_value.toFixed(2)}</td>
+      <td>${h.is_recommended ? '<span class="badge-buy">買い</span>' : ""}</td>
+    </tr>
+  `).join("");
+
+  return `
+    <div class="race-card">
+      <div class="race-header">
+        <div class="race-title">${race.course} ${race.round}R</div>
+        <div class="race-meta">${race.race_date}　${race.surface}${race.distance}m　${race.race_class}</div>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>印</th><th>馬</th><th>素点順位</th><th>オッズ後順位</th>
+              <th>オッズ</th><th>人気</th><th>予測勝率</th><th>EV</th><th></th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+async function main() {
+  const mainEl = document.getElementById("main");
+
+  let data;
+  try {
+    const res = await fetch("data/predictions.json", { cache: "no-store" });
+    data = await res.json();
+  } catch (e) {
+    mainEl.innerHTML = `<div class="empty-state">予測データの読み込みに失敗しました。</div>`;
+    return;
+  }
+
+  renderSettings(data.settings || {}, data.generated_at);
+
+  const races = data.races || [];
+  if (races.length === 0) {
+    mainEl.innerHTML = `<div class="empty-state">現在、予測対象のレース（未確定・出馬表公開済み）はありません。<br>開催が近づくと表示されます。</div>`;
+    return;
+  }
+
+  const summaryHtml = renderRecommendSummary(races);
+  const cardsHtml = races.map(renderRaceCard).join("");
+  mainEl.innerHTML = summaryHtml + cardsHtml;
+}
+
+main();
+</script>
+
+</body>
+</html>

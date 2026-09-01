@@ -54,7 +54,8 @@ from ai.build_dataset import (
     build_upcoming_dataset,
 )
 from ai.train_model import train_model
-from config.config import OUTPUT_DIR
+from config.config import PROJECT_ROOT as CONFIG_PROJECT_ROOT
+from database.db_manager import DatabaseManager
 
 # Stage3確定基準値（帯の代表値。README「Stage3としての基準値」参照）
 EV_THRESHOLD = 1.4
@@ -63,7 +64,9 @@ CLASS_FILTER = True
 
 PREDICTION_MARKS = ["◎", "○", "▲", "△", "☆"]
 
-PREDICTIONS_OUTPUT_PATH = OUTPUT_DIR / "predictions_latest.json"
+# GitHub Pagesアプリ（docs/）がそのまま読み込む場所に直接書き出す
+# （docs/index.htmlがfetch("data/predictions.json")する）
+PREDICTIONS_OUTPUT_PATH = CONFIG_PROJECT_ROOT / "docs" / "data" / "predictions.json"
 
 
 def train_current_model(log=print):
@@ -200,6 +203,43 @@ def export_predictions(scored, output_path=PREDICTIONS_OUTPUT_PATH):
     return output_path
 
 
+def save_predictions_to_db(scored, db=None):
+    """予測結果をpredictionsテーブルへ保存する（実運用の予測ログ）。
+    score=odds_adjusted_score、probability=pred_win_prob、rank=odds_adjusted_rankを
+    保存する。is_recommended（買い目推奨かどうか）はここでは保存せず、後から
+    analysis/prediction_verification.pyがmarket_odds・race_classを見て
+    再計算する（推奨ロジック自体が変わっても、過去に保存した予測ログの
+    score/probabilityは変えずに済むようにするため）。
+    レース発走までに複数回実行された場合はrace_id+horse_idで上書きされ、
+    常に最新の予測が残る"""
+    if db is None:
+        db = DatabaseManager()
+
+    if len(scored) == 0:
+        return 0
+
+    sql = """
+        INSERT INTO predictions (race_id, horse_id, score, probability, expected_value, rank)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(race_id, horse_id) DO UPDATE SET
+            score = excluded.score,
+            probability = excluded.probability,
+            expected_value = excluded.expected_value,
+            rank = excluded.rank
+    """
+    n = 0
+    for _, row in scored.iterrows():
+        rank = None if pd.isna(row["odds_adjusted_rank"]) else int(row["odds_adjusted_rank"])
+        db.execute(sql, (
+            row["race_id"], row["horse_id"],
+            float(row["odds_adjusted_score"]) if not pd.isna(row["odds_adjusted_score"]) else None,
+            float(row["pred_win_prob"]), float(row["expected_value"]), rank,
+        ))
+        n += 1
+
+    return n
+
+
 def main():
     print("=" * 70)
     print("dsk_Project")
@@ -216,6 +256,9 @@ def main():
     output_path = export_predictions(scored)
     print()
     print(f"予測結果を出力: {output_path}")
+
+    n_saved = save_predictions_to_db(scored)
+    print(f"predictionsテーブルへ保存: {n_saved}件")
 
 
 if __name__ == "__main__":
