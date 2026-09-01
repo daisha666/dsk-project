@@ -186,8 +186,14 @@ CREATE TABLE IF NOT EXISTS features (
     overall_score REAL,        -- 素点の総合力 = 8項目合計 × (1 + pace_bias_adjustment)
 
     -- オッズ由来の特徴量
-    market_odds REAL,          -- 単勝オッズ
-    market_popularity INTEGER, -- 人気
+    -- market_odds / market_popularityは未使用列（意図的に空のまま）。
+    -- オッズ・人気の実体は常にentries.odds / entries.popularityを直接参照すること
+    -- （collectors/yahoo_result_collector.py・yahoo_denma_collector.pyが書き込む
+    -- 唯一の場所）。この2列にコピーして二重管理すると更新漏れでズレる恐れがあるため、
+    -- あえて同期させていない（feature_engineering/odds_score.py・ai/build_dataset.py
+    -- も両方ともentries側を直接参照する設計にしている）
+    market_odds REAL,
+    market_popularity INTEGER,
     odds_adjusted_score REAL,  -- オッズ反映後の最終指数 = overall_score * (1/odds) * ODDS_SCORE_MULTIPLIER
 
     -- レース内順位（両方式を並行記録・比較する）

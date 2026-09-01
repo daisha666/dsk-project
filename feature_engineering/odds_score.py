@@ -94,11 +94,17 @@ class OddsScoreFeatureBuilder:
         return [r[0] for r in rows]
 
     def fetch_race_entries(self, race_id):
-        """対象レースの [(horse_id, overall_score, market_odds), ...] を返す"""
+        """対象レースの [(horse_id, overall_score, market_odds), ...] を返す。
+        オッズはentries.odds（Yahoo競馬の収集元。collectors/yahoo_result_collector.py /
+        yahoo_denma_collector.pyが保存）から取得する。features.market_oddsという同名の
+        列がスキーマ上は存在するが、これを書き込むbuilderが無く常にNULLのため
+        使ってはいけない（バグの温床になっていた。ai/build_dataset.pyも同じ理由で
+        entries.oddsを直接使っている）"""
         return self.db.fetchall("""
-            SELECT horse_id, overall_score, market_odds
-            FROM features
-            WHERE race_id = ?
+            SELECT f.horse_id, f.overall_score, e.odds
+            FROM features f
+            JOIN entries e ON e.race_id = f.race_id AND e.horse_id = f.horse_id
+            WHERE f.race_id = ?
         """, (race_id,))
 
     def build(self, log=print):
