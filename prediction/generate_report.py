@@ -276,21 +276,24 @@ def render_horse_row(h):
 def render_recommend_box(horses):
     """このレースの買い目推奨（is_recommended=Trueの馬）を、従来ホーム1ページに
     出していた買い目推奨サマリーと同じ見た目でレースごとに表示する。
-    推奨馬がいなければ何も表示しない"""
+    推奨馬がいないレースでも、その旨が分かるようボックス自体は常に表示する"""
     recommended = horses[horses["is_recommended"]].sort_values("expected_value", ascending=False)
-    if len(recommended) == 0:
-        return ""
 
-    items = "".join(f"""
+    if len(recommended) == 0:
+        items = '<div class="recommend-item"><span>－</span></div>'
+        heading = "買い目推奨"
+    else:
+        items = "".join(f"""
 <div class="recommend-item">
   <span>{h["horse_number"]:.0f}番 {_esc(h["horse_name"])}</span>
   <span class="odds">EV {h["expected_value"]:.2f} / {h["market_odds"]:.1f}倍</span>
 </div>
 """ for _, h in recommended.iterrows())
+        heading = f"買い目推奨（{len(recommended)}点）"
 
     return f"""
 <div class="recommend-summary">
-  <h2>買い目推奨（{len(recommended)}点）</h2>
+  <h2>{heading}</h2>
   {items}
 </div>
 """
