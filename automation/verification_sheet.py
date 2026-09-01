@@ -52,14 +52,16 @@ YEN_FORMAT = {"numberFormat": {"type": "NUMBER", "pattern": '#,##0"円"'}}
 SUMMARY_HEADER = ["対象予測数(結果確定済み)", "買い目推奨数", "的中数", "的中率(%)",
                    "総購入額(円)", "総払戻額(円)", "回収率(%)", "払戻欠損"]
 
-# ---- グラフ（回収率推移）。列方向のオフセットで表の右側に置く方式は、列幅の
-#      実際のレンダリング次第で表と重なる事故があった（ユーザー報告）ため
-#      A列に統一し、行方向も「下の表の下」（表が育つと追いつかれる懸念が
-#      ユーザーからあった）ではなく、常に一定サイズの本グラフを先頭
-#      （Stage3確定基準のすぐ下）に固定し、増減する各表はその下に置く方式にした ----
+# ---- グラフ（回収率推移）。行方向は「下の表の下」（表が育つと追いつかれる
+#      懸念）を避けるため、常に一定サイズの本グラフを先頭（Stage3確定基準の
+#      すぐ下）に固定し、増減する各表はその下に置く。列方向は表（A〜I列）と
+#      重ならないよう、実行履歴データが無い状態（Googleスプレッドシートが
+#      「データの可視化を開始するには」という空グラフのプレースホルダーを
+#      指定サイズと関係なく大きめに描画する）でも重ならないよう、J列より
+#      明確に右（L列）にオフセットする ----
 CHART_TITLE_ROW = len(SETTINGS_BLOCK) + 1  # 7
 CHART_ANCHOR_ROW = CHART_TITLE_ROW  # 0-indexedのrowIndexとしてそのまま使う（1行分のズレでちょうど良い）
-CHART_ANCHOR_COL_INDEX = 0  # A列
+CHART_ANCHOR_COL_INDEX = 0  # A列（累積成績サマリーの真上に配置）
 CHART_ROW_SPAN = 20  # 380pxのグラフ高さ（既定の行高21px換算で約18行）を収める余裕
 
 # ---- 累積成績サマリー ----
@@ -116,7 +118,10 @@ def ensure_verification_sheet(sh, log=print):
     except gspread.WorksheetNotFound:
         pass
 
-    ws = sh.add_worksheet(title=VERIFICATION_SHEET_NAME, rows=HISTORY_START_ROW + MAX_CHART_ROWS, cols=10)
+    # colsは表の列数（最大I列=9列）ぎりぎりにすると、グラフをそれより右へ
+    # 配置しようとした際にAPIエラー（グリッド範囲外）になる・境界ぎりぎりの
+    # 列だと描画がおかしくなることがあったため、余裕を持たせる
+    ws = sh.add_worksheet(title=VERIFICATION_SHEET_NAME, rows=HISTORY_START_ROW + MAX_CHART_ROWS, cols=30)
     log(f"「{VERIFICATION_SHEET_NAME}」シートを新規作成")
     _write_layout_headers(ws)
     ws.freeze(rows=CUMULATIVE_TITLE_ROW - 1)
