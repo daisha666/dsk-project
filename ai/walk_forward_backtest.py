@@ -34,7 +34,7 @@ sys.path.append(str(PROJECT_ROOT))
 from ai.build_dataset import BASE_FEATURE_COLUMNS, CATEGORICAL_COLUMNS, FEATURE_COLUMNS, build_dataset
 from ai.train_model import evaluate_model, split_by_date, train_model
 
-N_FOLDS = 4
+N_FOLDS = 8
 
 
 def generate_folds(dataset, n_folds=N_FOLDS):
