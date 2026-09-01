@@ -84,7 +84,7 @@ def race_badge(race_class):
     tier = classify_class_tier(race_class)
     label = CLASS_BADGE_LABELS.get(tier)
     if label:
-        return f'<span class="badge">{label}</span>'
+        return f'<div class="badge">{label}</div>'
     return ""
 
 
@@ -170,9 +170,9 @@ def render_race_nav_card(race_id, course, round_no, race_name, race_class):
 <a href="race_{race_id}.html">
   <div class="race-nav-card">
     {race_badge(race_class)}
-    <span class="course">{_esc(course)}</span>
-    <span class="round">{round_no:.0f}R</span>
-    <span class="name">{_esc(race_name)}</span>
+    <div class="course">{_esc(course)}</div>
+    <div class="round">{round_no:.0f}R</div>
+    <div class="name">{_esc(race_name)}</div>
   </div>
 </a>
 """
@@ -225,13 +225,14 @@ def render_date_index_page(race_date, race_infos):
     )
 
     body = f"""
-<header>
+<header class="date-top-header">
   <h1><span class="logo">🏇</span>dsk_Project 予想</h1>
   <p class="subtitle">{race_date}</p>
-  <div class="settings-bar" id="autorefresh-bar"></div>
+  <div class="settings-bar" id="autorefresh-bar" style="justify-content:center;"></div>
 </header>
 <main class="container">
   <a class="back-link" href="../index.html">← 開催日一覧に戻る</a>
+  <div class="date-title">{race_date} 開催レース（{len(race_infos)}レース）</div>
   <div class="race-grid">{cards}</div>
 </main>
 <footer>

@@ -90,37 +90,58 @@ h1 {
   font-size: 0.85rem;
   margin-bottom: 12px;
 }
+.date-top-header {
+  text-align: center;
+  padding-top: 4px;
+}
+.date-top-header h1 {
+  display: inline;
+  font-size: 1.2rem;
+}
+.date-top-header .subtitle {
+  margin: 4px 0 0;
+}
+.date-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  margin: 16px 2px 8px;
+}
 .race-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
 }
 .race-nav-card {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
+  display: block;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 14px 16px;
+  border-radius: 10px;
+  padding: 10px 6px;
+  text-align: center;
+  position: relative;
   text-decoration: none;
 }
 .race-nav-card:hover { border-color: var(--accent); }
+.race-nav-card .course { font-size: 0.65rem; color: var(--text-dim); }
+.race-nav-card .round { font-size: 1.3rem; font-weight: 900; color: var(--accent); margin: 2px 0; }
+.race-nav-card .name {
+  font-size: 0.65rem;
+  color: var(--text);
+  line-height: 1.3;
+  height: 2.6em;
+  overflow: hidden;
+}
 .race-nav-card .badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
   background: var(--warn);
   color: #241300;
-  font-weight: 700;
-  border-radius: 4px;
-  padding: 1px 6px;
-  font-size: 0.7rem;
-}
-.race-nav-card .course { font-weight: 600; }
-.race-nav-card .round { color: var(--text-dim); font-size: 0.85rem; }
-.race-nav-card .name {
-  color: var(--text-dim);
-  font-size: 0.85rem;
-  margin-left: auto;
-  text-align: right;
+  font-weight: 800;
+  border-radius: 6px;
+  padding: 1px 5px;
+  font-size: 0.6rem;
 }
 
 /* レース予想（詳細）ページ */
