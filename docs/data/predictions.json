@@ -1,3 +1,9 @@
 {
+  "generated_at": "2026-09-01T21:00:43.611856",
+  "settings": {
+    "ev_threshold": 1.4,
+    "odds_cap": 30,
+    "class_filter": true
+  },
   "races": []
 }

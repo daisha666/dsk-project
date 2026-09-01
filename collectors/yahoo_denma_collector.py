@@ -60,6 +60,11 @@ DENMA_PEDIGREE_PATTERN = re.compile(r"父：(.+?)母：(.+?)\(母父：(.+?)\)")
 
 HORSE_LINK_PATTERN = re.compile(r"/directory/horse/(\d+)/?$")
 
+# オッズページ（race/odds/tfw）の複勝セル "5.1-7.4" -> low, high
+PLACE_ODDS_RANGE_PATTERN = re.compile(r"^([\d.]+)-([\d.]+)$")
+
+HORSE_LINK_PATTERN = re.compile(r"/directory/horse/(\d+)/?$")
+
 
 class YahooDenmaCollector(BaseCollector):
     """Yahoo!スポーツナビ 競馬の出馬表ページから、まだ結果が確定していない
@@ -235,6 +240,71 @@ class YahooDenmaCollector(BaseCollector):
             })
 
         return entries
+
+    # ------------------------------------------------------------
+    # オッズページ（race/odds/tfw） - 発走前オッズの最新値取得
+    # ------------------------------------------------------------
+
+    def fetch_tfw_odds(self, race_id):
+        """race/odds/tfw/{race_id}（2026-08-31にブラウザで構造を確認済み。
+        列: 枠番/馬番/馬名/単勝/複勝）から
+        {horse_id: (win_odds, place_odds_low, place_odds_high)} を取得する。
+        automation/odds_refresh_job.py（オッズ自動更新）専用。取消・除外等で
+        オッズが「****」表示の馬は取得対象外"""
+        url = f"{BASE_URL}/keiba/race/odds/tfw/{race_id}"
+        soup = self.get_html(url)
+        time.sleep(self.sleep_sec)
+
+        table = None
+        for t in soup.find_all("table"):
+            header_text = t.find("tr").get_text() if t.find("tr") else ""
+            if "単勝" in header_text and "複勝" in header_text and "馬番" in header_text:
+                table = t
+                break
+
+        odds = {}
+        if table is None:
+            return odds
+
+        for tr in table.find_all("tr")[1:]:
+            cells = tr.find_all(["th", "td"])
+            if len(cells) < 5:
+                continue
+
+            horse_link = None
+            for c in cells:
+                horse_link = c.find("a", href=HORSE_LINK_PATTERN)
+                if horse_link:
+                    break
+            if not horse_link:
+                continue
+            horse_id = HORSE_LINK_PATTERN.search(horse_link["href"]).group(1)
+
+            win_text = cells[3].get_text(strip=True)
+            place_text = cells[4].get_text(strip=True)
+
+            try:
+                win_odds = float(win_text)
+            except ValueError:
+                win_odds = None
+
+            place_low = place_high = None
+            range_match = PLACE_ODDS_RANGE_PATTERN.match(place_text)
+            if range_match:
+                place_low, place_high = (float(v) for v in range_match.groups())
+
+            odds[horse_id] = (win_odds, place_low, place_high)
+
+        return odds
+
+    def update_entry_odds(self, race_id, horse_id, win_odds, place_low, place_high):
+        """entriesの単勝オッズ・複勝オッズ範囲だけを更新する（人気は出馬表側の
+        値をそのまま残す。人気順位は複勝オッズ帯より安定しており、tfwページ
+        だけを見て毎回書き換えると却って揺れが出るため）"""
+        self.db.execute("""
+            UPDATE entries SET odds = ?, place_odds_low = ?, place_odds_high = ?
+            WHERE race_id = ? AND horse_id = ?
+        """, (win_odds, place_low, place_high, race_id, horse_id))
 
     # ------------------------------------------------------------
     # DB保存

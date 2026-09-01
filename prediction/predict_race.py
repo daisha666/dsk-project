@@ -104,7 +104,13 @@ def score_upcoming_races(model, log=print):
 
     ev_ok = scored["expected_value"] >= EV_THRESHOLD
     odds_ok = scored["market_odds"] <= ODDS_CAP
-    class_ok = scored["race_class"].apply(is_class_included) if CLASS_FILTER else True
+    if CLASS_FILTER:
+        # race_classはcategory dtypeのため、.apply()の戻り値もcategory dtypeに
+        # なることがあり、その場合bool同士の&演算ができずTypeErrorになる
+        # （dry run検証で発覚）。astype(bool)で明示的に素のbool型へ変換する
+        class_ok = scored["race_class"].apply(is_class_included).astype(bool)
+    else:
+        class_ok = True
     scored["is_recommended"] = ev_ok & odds_ok & class_ok
 
     return assign_marks(scored)
@@ -154,7 +160,15 @@ def export_predictions(scored, output_path=PREDICTIONS_OUTPUT_PATH):
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     if len(scored) == 0:
-        payload = {"races": []}
+        payload = {
+            "generated_at": pd.Timestamp.now().isoformat(),
+            "settings": {
+                "ev_threshold": EV_THRESHOLD,
+                "odds_cap": ODDS_CAP,
+                "class_filter": CLASS_FILTER,
+            },
+            "races": [],
+        }
     else:
         races = []
         for race_id, group in scored.groupby("race_id"):

@@ -68,13 +68,44 @@ GASベースの「競馬予想2」で得られた知見――**オッズを反�
 - [x] GitHub Pagesアプリ（`docs/`。https://daisha666.github.io/dsk-project/ で公開。
       `predict_race.py`が書き出す`docs/data/predictions.json`を読み込み、買い目推奨・
       全馬スコア一覧〈素点順位・オッズ後順位を両方表示〉を表示する単一HTML/JSページ）
-- [ ] **Google Sheets連携（操作パネル・検証結果の2タブ）— コードは実装済みだがユーザー側の
-      一度きりの作業待ち**。サービスアカウントは自分自身のDriveストレージを持たず新規
-      スプレッドシートを作成できないため（`prediction/sheets_report.py`参照）、
-      ①ユーザーが「dsk_Project」という名前でGoogle Sheetsを作成し、②サービスアカウント
-      （`project-ev-sheets@plenary-ellipse-433307-u6.iam.gserviceaccount.com`、
-      PROJECT_EVと共通）を編集者として共有し、③そのスプレッドシートIDを
-      `automation/sheet_config.py`のSPREADSHEET_IDに設定する、の3ステップが必要
+- [x] **Google Sheets連携（操作パネル・検証結果・AI自己分析の3タブ）**。実際のスプレッドシート
+      `dsk_Project`（ID: `1CtHs765uaLP-E2BnY-CWgDAaR3VVoKt_yiVYaInm0Fs`）に接続済み。
+      - 操作パネル（`automation/sheet_control_panel.py`）: 3つのチェックボックス
+        ①データ取得・検証・予想生成（`automation/denma_predict_job.py`）
+        ②オッズ取得・予想更新（`automation/odds_refresh_job.py`）
+        ③結果取得・検証（`automation/result_verify_job.py`）
+        に加えて5行目に「オッズ自動更新」ON/OFFスイッチ（下記自動更新ジョブが読み書きする）
+      - 検証結果（`automation/verification_sheet.py`）: `analysis/prediction_verification.py`の
+        結果を履歴として追記
+      - AI自己分析（`automation/ai_self_report.py`）: 直近N件と累計の的中率・回収率を比較し、
+        傾向の変化（悪化/改善）を検知したら所見を追記。PROJECT_EVより簡略化（単勝のみ、
+        複数賭式・大穴・信頼度別の分布は無し）
+      - `automation/watcher.py`がPROJECT_EVと同じくポーリングで3ジョブを実行
+- [x] **オッズ自動更新（開催日9:30〜最終レース終了・5分おき）**。PROJECT_EVの実装
+      （Windowsタスクスケジューラでのポーリング）と同じ方式で実装。
+      `automation/odds_auto_refresh_job.py`が自己完結で状態判定する:
+      当日開催が無ければ何もしない、確定結果が全て揃えばスイッチをOFFに戻す、それ以外は
+      スイッチをONにして`odds_refresh_job.py`（軽量: 再学習はせず`predictions`テーブルの
+      予測勝率キャッシュを再利用し、オッズだけ再取得して期待値・順位を再計算）を実行する。
+      Windowsタスクスケジューラに`DskProject Watcher`（`automation/watcher.py`常駐）と
+      `DskProject OddsAutoRefresh`（5分おき、9:30開始・PT7H30M継続でPROJECT_EVと同一設定）
+      の2タスクを登録・検証済み
+      - **ドライラン検証済み**: 本番の9/5を待たず、テスト用にコピーしたDB上で開催日・9:30の
+        状態を模擬し、①未終了時にスイッチON→②5分おき更新を継続（実際のtfwオッズページへの
+        HTTPフェッチも含めて成功）→③結果確定後にスイッチが自動でOFFに戻る、の一連の流れを
+        確認した。本番DB・Gitリポジトリには一切影響なし（コピーDBと出力先を差し替えて実行）。
+        ドライラン中に見つかった2件の不具合はいずれも修正済み:
+        1. `race_class`がcategory dtypeのままの状態で`&`演算するとTypeErrorになる不具合
+           （`prediction/predict_race.py`・`automation/odds_refresh_job.py`の両方に存在。
+           `.astype(bool)`で修正）
+        2. `export_predictions()`の`output_path`引数のデフォルト値が関数定義時（import時）に
+           束縛される仕様のため、テストスクリプトで本番パスの差し替えが効かず、テストデータが
+           一時的に`docs/data/predictions.json`に書き込まれた（pushはmock済みのため本番サイトへの
+           影響なし）。実データで`predict_race.py`を再実行し正しい状態に復元済み
+      - **未検証（ユーザー側の作業待ち）**: 状態表示・`autorefresh_status`エンドポイントの
+        エンドツーエンド確認。GAS Webアプリ（`automation/gas/odds_refresh_webapp.gs`）が
+        サービスアカウントでは作成できずユーザー側での手動デプロイが必要なため未デプロイ。
+        デプロイ後にWebアプリURLを`docs/index.html`の`GAS_WEBAPP_URL`に設定する必要がある
 - [ ] **既知の運用課題**: `feature_engineering/`の8項目パイプラインは全件を毎回フル再計算する
       設計（約7時間、Stage1「既知の課題」参照）。`automation/denma_predict_job.py`が新規に
       出馬表を保存しても、8項目・overall_score・odds_adjusted_scoreの再計算を別途フルで

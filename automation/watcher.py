@@ -31,6 +31,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
 from automation.denma_predict_job import run_denma_predict_job
+from automation.odds_refresh_job import run_odds_refresh_job
 from automation.result_verify_job import run_result_verify_job
 from automation.sheet_control_panel import (
     ensure_control_panel,
@@ -44,6 +45,7 @@ POLL_INTERVAL_SEC = 300
 
 JOB_RUNNERS = {
     "denma_predict": run_denma_predict_job,
+    "odds_refresh": run_odds_refresh_job,
     "result_verify": run_result_verify_job,
 }
 

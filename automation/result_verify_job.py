@@ -52,6 +52,13 @@ def run_result_verify_job(log=print):
         append_verification_result(ws, result, log=log)
     except Exception as exc:
         log(f"検証結果シートへの書き込みに失敗（DB上の検証結果自体は算出済み）: {exc}")
+        sh = None
+
+    try:
+        from automation.ai_self_report import append_self_analysis
+        append_self_analysis(rows, sh=sh, log=log)
+    except Exception as exc:
+        log(f"AI自己分析シートへの書き込みに失敗（本体の検証結果には影響なし）: {exc}")
 
     return (
         f"結果{stats['races']}レース保存。実運用検証: "

@@ -107,10 +107,10 @@ class OddsScoreFeatureBuilder:
             WHERE f.race_id = ?
         """, (race_id,))
 
-    def build(self, log=print):
-        """overall_score計算済みの全レースについて、オッズ反映後スコア・両順位を計算・保存する"""
-        race_ids = self.fetch_race_ids()
-
+    def build_for_races(self, race_ids, log=print):
+        """指定したrace_idだけについて、オッズ反映後スコア・両順位を再計算・保存する
+        （automation/odds_refresh_job.pyのような軽量なオッズ更新用。build()と違い
+        overall_score計算済みの全レースを毎回舐めない）"""
         for race_id in race_ids:
             rows = self.fetch_race_entries(race_id)
 
@@ -130,6 +130,11 @@ class OddsScoreFeatureBuilder:
         log(f"完了: 対象レース数={len(race_ids)}")
 
         return {"total_races": len(race_ids)}
+
+    def build(self, log=print):
+        """overall_score計算済みの全レースについて、オッズ反映後スコア・両順位を計算・保存する"""
+        race_ids = self.fetch_race_ids()
+        return self.build_for_races(race_ids, log=log)
 
 
 if __name__ == "__main__":

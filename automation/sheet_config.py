@@ -14,8 +14,7 @@ project-ev-sheets@...gserviceaccount.com、PROJECT_EVと共通）を編集者と
 一度きりの作業として必須。
 """
 
-# TODO: ユーザーがスプレッドシートを作成・共有したら、ここにIDを設定する
-SPREADSHEET_ID = ""
+SPREADSHEET_ID = "1CtHs765uaLP-E2BnY-CWgDAaR3VVoKt_yiVYaInm0Fs"  # dsk_Project
 
 CONTROL_PANEL_SHEET_NAME = "操作パネル"
 VERIFICATION_SHEET_NAME = "検証結果"

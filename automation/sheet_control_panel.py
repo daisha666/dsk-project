@@ -1,21 +1,21 @@
 """
 dsk_Project
 自動化: Googleスプレッドシート「操作パネル」シート管理
-Version 0.1
+Version 0.2
 
 PROJECT_EVのautomation/sheet_control_panel.pyと同じ設計（チェック行を
-ポーリングし、チェックが入ったら該当処理を実行、完了後に自動でOFFへ戻す）を
-踏襲しつつ、開発指示書の「シンプルな2タブ構成」の方針に合わせて2ジョブに
-絞った、より単純な版。
+ポーリングし、チェックが入ったら該当処理を実行、完了後に自動でOFFへ戻す。
+row5はオッズ自動更新の状態フラグで、ユーザー操作の対象ではない）を踏襲。
 
 行構成:
-  row2: 出馬表取得→予想実行（yahoo_denma_collector.py → predict_race.py）
-  row3: 結果取得→検証実行（yahoo_result_collector.py → prediction_verification.py）
+  row2: ①データ取得・検証・予想生成（出馬表取得→predict_race.py）
+  row3: ②オッズ取得・予想更新（tfwオッズ再取得→期待値再計算、軽量・モデル再学習なし）
+  row4: ③結果取得・検証（結果取得→prediction_verification.py）
+  row5: オッズ自動更新の状態フラグ（開催日9:30〜17:00・5分おき。
+        automation/odds_auto_refresh_job.pyが自動でON/OFFする。ユーザーは
+        変更しない。B5=状態〈TRUE/FALSE〉 C5=最終更新時刻）
 
 列構成: A=処理名 B=実行チェック C=ステータス D=開始時刻 E=完了時刻 F=所要時間(秒) G=最新ログ
-
-実際にジョブを実行するポーリングループはautomation/watcher.pyが担当する
-（本モジュールはスプレッドシートの読み書きだけを担当し、ジョブの中身は知らない）。
 """
 
 import sys
@@ -33,9 +33,15 @@ from prediction.sheets_report import get_client
 HEADER = ["処理名", "実行", "ステータス", "開始時刻", "完了時刻", "所要時間(秒)", "最新ログ"]
 
 JOBS = [
-    {"key": "denma_predict", "row": 2, "label": "出馬表取得→予想実行"},
-    {"key": "result_verify", "row": 3, "label": "結果取得→検証実行"},
+    {"key": "denma_predict", "row": 2, "label": "①データ取得・検証・予想生成"},
+    {"key": "odds_refresh", "row": 3, "label": "②オッズ取得・予想更新"},
+    {"key": "result_verify", "row": 4, "label": "③結果取得・検証"},
 ]
+
+AUTO_REFRESH_ROW = 5
+AUTO_REFRESH_LABEL = "オッズ自動更新（開催日9:30〜17:00・5分おき・自動ON/OFF）"
+AUTO_REFRESH_SWITCH_CELL = f"B{AUTO_REFRESH_ROW}"
+AUTO_REFRESH_LAST_UPDATED_CELL = f"C{AUTO_REFRESH_ROW}"
 
 
 def get_sheet():
@@ -80,7 +86,48 @@ def ensure_control_panel(sh, log=print):
                 ws.update([[j["label"], False, "待機中", "", "", "", ""]],
                           f"A{j['row']}", value_input_option="USER_ENTERED")
 
+    _ensure_auto_refresh_row(sh, ws, log=log)
+
     return ws
+
+
+def _ensure_auto_refresh_row(sh, ws, log=print):
+    """row5（オッズ自動更新スイッチ）が無ければ追加する。既にあれば、
+    現在のON/OFF状態・最終更新時刻は壊さずラベル（A列）だけ揃える"""
+    existing_values = ws.get_all_values()
+    row_exists = len(existing_values) >= AUTO_REFRESH_ROW and existing_values[AUTO_REFRESH_ROW - 1]
+    if row_exists:
+        return
+
+    ws.update([[AUTO_REFRESH_LABEL, False, ""]], f"A{AUTO_REFRESH_ROW}", value_input_option="USER_ENTERED")
+    requests = [{
+        "setDataValidation": {
+            "range": {
+                "sheetId": ws.id,
+                "startRowIndex": AUTO_REFRESH_ROW - 1, "endRowIndex": AUTO_REFRESH_ROW,
+                "startColumnIndex": 1, "endColumnIndex": 2,
+            },
+            "rule": {"condition": {"type": "BOOLEAN"}, "strict": True},
+        }
+    }]
+    sh.batch_update({"requests": requests})
+    log(f"「{AUTO_REFRESH_LABEL}」行を追加")
+
+
+def get_auto_refresh_switch(ws):
+    value = ws.acell(AUTO_REFRESH_SWITCH_CELL).value
+    return str(value).strip().upper() == "TRUE"
+
+
+def set_auto_refresh_switch(ws, on, log=print):
+    ws.update([[bool(on)]], AUTO_REFRESH_SWITCH_CELL, value_input_option="USER_ENTERED")
+    log(f"オッズ自動更新スイッチを{'ON' if on else 'OFF'}にしました")
+
+
+def set_auto_refresh_last_updated(ws, when=None):
+    when = when or datetime.now()
+    ws.update([[when.strftime("%Y-%m-%d %H:%M:%S")]], AUTO_REFRESH_LAST_UPDATED_CELL,
+              value_input_option="USER_ENTERED")
 
 
 def read_jobs(ws):

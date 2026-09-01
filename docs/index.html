@@ -167,6 +167,7 @@
   <h1>dsk_Project 予想</h1>
   <p class="subtitle">オッズを反映した最終指数（AK列相当）で印を決定する投資型競馬AI</p>
   <div class="settings-bar" id="settings-bar"></div>
+  <div class="settings-bar" id="autorefresh-bar"></div>
 </header>
 
 <main id="main">
@@ -180,6 +181,13 @@
 
 <script>
 const MARK_COLORS = {"◎": "#ff6b6b", "○": "#ffb347", "▲": "#5aa9ff", "△": "#4cd07d", "☆": "#c084fc"};
+
+// automation/gas/odds_refresh_webapp.gs をデプロイしたら、発行された
+// ウェブアプリURL（.../exec で終わるもの）をここに設定する（未設定の間は
+// 状態表示欄を出さない）。SECRET_KEYは.gsファイルと同じ値にすること
+const GAS_WEBAPP_URL = "";
+const GAS_SECRET_KEY = "7CGmsbp8IFy6oSbFwIHocp2fXzQ";
+const AUTOREFRESH_POLL_MS = 60000;
 
 function fmtPct(v) {
   return (v * 100).toFixed(1) + "%";
@@ -261,8 +269,37 @@ function renderRaceCard(race) {
   `;
 }
 
+async function pollAutoRefreshStatus() {
+  const bar = document.getElementById("autorefresh-bar");
+  if (!GAS_WEBAPP_URL) {
+    return;
+  }
+
+  try {
+    const url = `${GAS_WEBAPP_URL}?key=${encodeURIComponent(GAS_SECRET_KEY)}&action=autorefresh_status`;
+    const res = await fetch(url, { cache: "no-store" });
+    const data = await res.json();
+
+    if (data.status !== "ok") {
+      bar.innerHTML = `<span>オッズ自動更新: 状態取得エラー</span>`;
+      return;
+    }
+
+    const label = data.autoRefreshOn ? "🟢 オッズ自動更新: 稼働中" : "⚪ オッズ自動更新: 停止中";
+    const updated = data.lastUpdatedAt ? `（最終更新 ${data.lastUpdatedAt}）` : "";
+    bar.innerHTML = `<span>${label}${updated}</span>`;
+  } catch (e) {
+    bar.innerHTML = `<span>オッズ自動更新: 状態取得エラー</span>`;
+  }
+}
+
 async function main() {
   const mainEl = document.getElementById("main");
+
+  pollAutoRefreshStatus();
+  if (GAS_WEBAPP_URL) {
+    setInterval(pollAutoRefreshStatus, AUTOREFRESH_POLL_MS);
+  }
 
   let data;
   try {
