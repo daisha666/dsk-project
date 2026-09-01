@@ -198,9 +198,14 @@ def build_dataset(db=None):
 def build_upcoming_dataset(db=None):
     """まだ結果が確定していないレースを、build_dataset()と同じ特徴量の形で
     pandas DataFrameとして返す（labelは無い。予測対象を作るための関数）。
-    build_dataset()と同じ理由で、出走馬全員が過去走データなしのレース
-    （新馬戦等）は除外する。raw_rank・odds_adjusted_rankは特徴量としては
-    使わないが、アプリ表示用に残す（prediction/predict_race.py参照）"""
+    build_dataset()（学習用）とは異なり、出走馬全員が過去走データなしの
+    レース（新馬戦等）も除外しない。表示対象のレース一覧に穴を開けない
+    ためで、FEATURE_COLUMNS_A_ODDS_ADJUSTED自体は騎手力・調教師力・血統力等
+    馬自身の過去走を必要としない列も含むため予測自体は計算できる（ただし
+    信頼度は下がる）。新馬戦・未勝利戦はai/backtest.py::EXCLUDED_CLASS_TIERSに
+    より買い目推奨の対象からは別途除外されるため、ここで除いておく必要はない。
+    raw_rank・odds_adjusted_rankは特徴量としては使わないが、アプリ表示用に残す
+    （prediction/predict_race.py参照）"""
     if db is None:
         db = DatabaseManager()
 
@@ -208,29 +213,9 @@ def build_upcoming_dataset(db=None):
     df = pd.read_sql_query(UPCOMING_QUERY, conn)
     conn.close()
 
-    # 未確定レースが1件も無い場合（開催間の谷間・全レース終了直後等）に
-    # 早期リターンする。0行のDataFrameに対してgroupby().transform()すると
-    # pandasが列を落とすことがあり、後段のdrop(columns=["stability_power"])が
-    # KeyErrorになるため
-    if len(df) == 0:
-        df = df.drop(columns=["stability_power"])
-        for col in CATEGORICAL_COLUMNS:
-            df[col] = df[col].astype("category")
-        df.attrs["excluded_debut_races"] = 0
-        df.attrs["total_races_before_debut_filter"] = 0
-        return df
-
-    total_races_before_debut_filter = df["race_id"].nunique()
-    race_all_debut = df.groupby("race_id")["stability_power"].transform(lambda s: s.isna().all())
-    excluded_debut_races = df.loc[race_all_debut, "race_id"].nunique()
-    df = df[~race_all_debut].copy()
     df = df.drop(columns=["stability_power"])
-
     for col in CATEGORICAL_COLUMNS:
         df[col] = df[col].astype("category")
-
-    df.attrs["excluded_debut_races"] = excluded_debut_races
-    df.attrs["total_races_before_debut_filter"] = total_races_before_debut_filter
 
     return df
 
