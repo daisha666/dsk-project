@@ -46,10 +46,8 @@ def run_result_verify_job(log=print):
     result = summarize(rows)
 
     try:
-        from automation.verification_sheet import append_verification_result, ensure_verification_sheet, get_sheet
-        sh = get_sheet()
-        ws = ensure_verification_sheet(sh, log=log)
-        append_verification_result(ws, result, log=log)
+        from automation.verification_sheet import update_verification_sheet
+        sh, _ws = update_verification_sheet(rows, result, log=log)
     except Exception as exc:
         log(f"検証結果シートへの書き込みに失敗（DB上の検証結果自体は算出済み）: {exc}")
         sh = None

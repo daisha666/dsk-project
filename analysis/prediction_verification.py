@@ -86,6 +86,26 @@ def summarize(rows, stake=STAKE):
     }
 
 
+def filter_most_recent_date(rows):
+    """rows（fetch_resolved_predictions()の戻り値。row[3]=race_date）のうち、
+    最も新しいrace_date（＝直近の検証ジョブ実行で新たに結果が確定した開催日、
+    という前提）に属する行だけを返す。「今回（直近）の成績」用"""
+    if not rows:
+        return []
+    latest_date = max(row[3] for row in rows)
+    return [row for row in rows if row[3] == latest_date]
+
+
+def group_by_month(rows):
+    """rowsをrace_date（row[3]、"YYYY-MM-DD"）の年月ごとにまとめ、
+    [(year_month, rows), ...] を古い順に返す。「月別成績」用"""
+    months = {}
+    for row in rows:
+        year_month = row[3][:7]
+        months.setdefault(year_month, []).append(row)
+    return sorted(months.items())
+
+
 def main():
     print("=" * 60)
     print("dsk_Project")

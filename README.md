@@ -80,8 +80,13 @@ GASベースの「競馬予想2」で得られた知見――**オッズを反�
         ②オッズ取得・予想更新（`automation/odds_refresh_job.py`）
         ③結果取得・検証（`automation/result_verify_job.py`）
         に加えて5行目に「オッズ自動更新」ON/OFFスイッチ（下記自動更新ジョブが読み書きする）
-      - 検証結果（`automation/verification_sheet.py`）: `analysis/prediction_verification.py`の
-        結果を履歴として追記
+      - 検証結果（`automation/verification_sheet.py`）: PROJECT_EVの検証結果シート
+        （②累積成績サマリー・③グラフ・④月別/年別成績）の構成を参考に、単勝オンリーの
+        シンプルな構成で実装。①累積成績サマリー（結果確定済みの全予測ログ対象）
+        ②今回（直近）の成績（直近に結果が確定した開催日分のみ）③月別成績
+        ④実行履歴＋回収率推移の折れ線グラフ（実行のたびに1行追記、グラフの元データ）の
+        4ブロック構成（PROJECT_EV固有の券種別内訳・信頼度別/波乱度別/危険馬判定の
+        答え合わせは無し）
       - AI自己分析（`automation/ai_self_report.py`）: 直近N件と累計の的中率・回収率を比較し、
         傾向の変化（悪化/改善）を検知したら所見を追記。PROJECT_EVより簡略化（単勝のみ、
         複数賭式・大穴・信頼度別の分布は無し）
