@@ -34,11 +34,23 @@ def find_active_race_ids(db):
 
 
 def refresh_odds_for_race(race_id, collector, db, log=print):
-    """1レース分のtfwオッズを再取得し、entries.odds等を更新する。
-    更新した頭数を返す（0なら出馬表が無い等でスキップ）"""
+    """1レース分のtfw（単勝・複勝）オッズとワイドオッズを再取得し、
+    entries.odds等・combination_oddsを更新する。更新した頭数を返す
+    （0なら出馬表が無い等でスキップ）。
+
+    ワイドの発走前オッズは複勝・ワイドEVバックテストに必要だが過去分は
+    存在しないため（README「複勝・ワイドのバックテスト」参照）、この
+    自動更新を通じて今後蓄積していく"""
     odds = collector.fetch_tfw_odds(race_id)
     for horse_id, (win_odds, place_low, place_high) in odds.items():
         collector.update_entry_odds(race_id, horse_id, win_odds, place_low, place_high)
+
+    try:
+        wide_odds = collector.fetch_wide_odds(race_id)
+        collector.save_wide_odds(race_id, wide_odds)
+    except Exception as exc:
+        log(f"[{race_id}] ワイドオッズ取得エラー（単勝・複勝は継続）: {exc}")
+
     return len(odds)
 
 

@@ -307,6 +307,69 @@ class YahooDenmaCollector(BaseCollector):
         """, (win_odds, place_low, place_high, race_id, horse_id))
 
     # ------------------------------------------------------------
+    # オッズページ（race/odds/wide） - ワイド発走前オッズの取得
+    # ------------------------------------------------------------
+
+    def fetch_wide_odds(self, race_id):
+        """race/odds/wide/{race_id}（2026-09-02にブラウザで構造を確認済み）から
+        ワイドの発走前オッズを取得する。ページは馬番1（枠番ではなく馬番）ごとに
+        別テーブルで、各テーブルの1行目は自分自身の馬番のみのセル（見出し行）、
+        以降の行が [相手の馬番, "低-高"倍率] という構成（自分より大きい馬番との
+        組み合わせのみを持つ。すなわち全体で上三角のみ、重複や自己ペアは無い）。
+        {(horse_number_1, horse_number_2): (odds_low, odds_high)} を返す
+        （horse_number_1 < horse_number_2に正規化する）。
+        combination_oddsテーブルには複勝・単勝のような取消判定の仕組みが無いため、
+        「****」等パース不能なセルは単にスキップする（automation/odds_refresh_job.py
+        （オッズ自動更新）専用。当面は蓄積のみで、複勝・ワイドのバックテストは
+        データが数ヶ月〜半年分蓄積されてから再検証する予定。README参照）"""
+        url = f"{BASE_URL}/keiba/race/odds/wide/{race_id}"
+        soup = self.get_html(url)
+        time.sleep(self.sleep_sec)
+
+        odds = {}
+        for table in soup.find_all("table"):
+            rows = table.find_all("tr")
+            if not rows:
+                continue
+
+            header_cells = rows[0].find_all(["th", "td"])
+            if len(header_cells) != 1:
+                continue
+            try:
+                horse_number_1 = int(header_cells[0].get_text(strip=True))
+            except ValueError:
+                continue
+
+            for tr in rows[1:]:
+                cells = tr.find_all(["th", "td"])
+                if len(cells) != 2:
+                    continue
+                try:
+                    horse_number_2 = int(cells[0].get_text(strip=True))
+                except ValueError:
+                    continue
+
+                range_match = PLACE_ODDS_RANGE_PATTERN.match(cells[1].get_text(strip=True))
+                if not range_match:
+                    continue
+                odds_low, odds_high = (float(v) for v in range_match.groups())
+
+                key = tuple(sorted((horse_number_1, horse_number_2)))
+                odds[key] = (odds_low, odds_high)
+
+        return odds
+
+    def save_wide_odds(self, race_id, wide_odds):
+        """fetch_wide_odds()の戻り値をcombination_oddsテーブルへ保存する
+        （race_id+bet_type+馬番の組で上書き）"""
+        for (horse_number_1, horse_number_2), (odds_low, odds_high) in wide_odds.items():
+            self.db.execute("""
+                INSERT OR REPLACE INTO combination_odds
+                    (race_id, bet_type, horse_number_1, horse_number_2, odds_low, odds_high)
+                VALUES (?, 'ワイド', ?, ?, ?, ?)
+            """, (race_id, horse_number_1, horse_number_2, odds_low, odds_high))
+
+    # ------------------------------------------------------------
     # DB保存
     # ------------------------------------------------------------
 
