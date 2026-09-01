@@ -145,6 +145,31 @@ h1 {
 }
 
 /* レース予想（詳細）ページ */
+.recommend-summary {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.recommend-summary h2 {
+  font-size: 1rem;
+  margin: 0 0 10px;
+}
+.recommend-item {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+.recommend-item:last-child { border-bottom: none; }
+.recommend-item .odds {
+  color: var(--warn);
+  white-space: nowrap;
+}
 .race-card {
   background: var(--panel);
   border: 1px solid var(--border);

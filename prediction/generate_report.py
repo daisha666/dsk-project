@@ -273,10 +273,34 @@ def render_horse_row(h):
 """
 
 
+def render_recommend_box(horses):
+    """このレースの買い目推奨（is_recommended=Trueの馬）を、従来ホーム1ページに
+    出していた買い目推奨サマリーと同じ見た目でレースごとに表示する。
+    推奨馬がいなければ何も表示しない"""
+    recommended = horses[horses["is_recommended"]].sort_values("expected_value", ascending=False)
+    if len(recommended) == 0:
+        return ""
+
+    items = "".join(f"""
+<div class="recommend-item">
+  <span>{h["horse_number"]:.0f}番 {_esc(h["horse_name"])}</span>
+  <span class="odds">EV {h["expected_value"]:.2f} / {h["market_odds"]:.1f}倍</span>
+</div>
+""" for _, h in recommended.iterrows())
+
+    return f"""
+<div class="recommend-summary">
+  <h2>買い目推奨（{len(recommended)}点）</h2>
+  {items}
+</div>
+"""
+
+
 def render_race_detail_page(race_info, horses, settings, generated_at):
     """race_infoは1レース分の{race_date, course, round, surface, distance, race_class}。
     horsesはそのレースの出走馬（DataFrame。odds_adjusted_rank昇順ソート済みを想定）"""
     rows = "".join(render_horse_row(h) for _, h in horses.iterrows())
+    recommend_html = render_recommend_box(horses)
 
     settings_html = "".join([
         f'<span>EV閾値 &gt;= {settings["ev_threshold"]}</span>',
@@ -291,6 +315,7 @@ def render_race_detail_page(race_info, horses, settings, generated_at):
 </header>
 <main class="container">
   <a class="back-link" href="index.html">← {race_info["race_date"]} の開催一覧に戻る</a>
+  {recommend_html}
   <div class="race-card">
     <div class="race-header">
       <div class="race-title">{_esc(race_info["race_name"])}（{_esc(race_info["course"])} {race_info["round"]:.0f}R）</div>
