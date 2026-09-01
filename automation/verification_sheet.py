@@ -69,16 +69,21 @@ MONTHLY_DATA_START_ROW = MONTHLY_HEADER_ROW + 1  # 17
 MONTHLY_HEADER = ["年月"] + SUMMARY_HEADER
 MONTHLY_MAX_ROWS = 40  # 3年強分の余裕（運用しながら足りなくなれば拡張する）
 
+# ---- グラフ（回収率推移。列方向のオフセットで表の右側に置く方式は、列幅の
+#      実際のレンダリング次第で表と重なる事故があったため、表の下の専用の
+#      空き行ブロックに配置する方式にした） ----
+CHART_TITLE_ROW = MONTHLY_DATA_START_ROW + MONTHLY_MAX_ROWS + 1  # 58
+CHART_ANCHOR_ROW = CHART_TITLE_ROW  # 0-indexedのrowIndexとしてそのまま使う（1行分のズレでちょうど良い）
+CHART_ANCHOR_COL_INDEX = 0  # A列。グラフ専用の行ブロックなので列は重ならない
+CHART_ROW_SPAN = 20  # 380pxのグラフ高さ（既定の行高21px換算で約18行）を収める余裕
+
 # ---- 実行履歴（グラフ用データ） ----
-HISTORY_TITLE_ROW = MONTHLY_DATA_START_ROW + MONTHLY_MAX_ROWS + 1  # 58
-HISTORY_HEADER_ROW = HISTORY_TITLE_ROW + 1  # 59
-HISTORY_START_ROW = HISTORY_HEADER_ROW + 1  # 60
+HISTORY_TITLE_ROW = CHART_TITLE_ROW + CHART_ROW_SPAN + 1  # 79
+HISTORY_HEADER_ROW = HISTORY_TITLE_ROW + 1  # 80
+HISTORY_START_ROW = HISTORY_HEADER_ROW + 1  # 81
 HISTORY_HEADER = ["更新日時", "対象予測数(結果確定済み)", "買い目推奨数", "的中数",
                    "的中率(%)", "総購入額(円)", "総払戻額(円)", "回収率(%)", "払戻欠損"]
 MAX_CHART_ROWS = 2000
-
-CHART_ANCHOR_ROW = CUMULATIVE_TITLE_ROW - 1
-CHART_ANCHOR_COL_INDEX = 9  # J列
 
 
 def get_sheet():
@@ -135,7 +140,10 @@ def _write_layout_headers(ws):
     ws.update([MONTHLY_HEADER], f"A{MONTHLY_HEADER_ROW}", value_input_option="USER_ENTERED")
     ws.format(f"A{MONTHLY_HEADER_ROW}:I{MONTHLY_HEADER_ROW}", HEADER_FORMAT)
 
-    ws.update([["■ 実行履歴（下記グラフの元データ。実行のたびに1行追記）"]], f"A{HISTORY_TITLE_ROW}")
+    ws.update([["■ 回収率(%)の推移グラフ"]], f"A{CHART_TITLE_ROW}")
+    ws.format(f"A{CHART_TITLE_ROW}", TITLE_FORMAT)
+
+    ws.update([["■ 実行履歴（上記グラフの元データ。実行のたびに1行追記）"]], f"A{HISTORY_TITLE_ROW}")
     ws.format(f"A{HISTORY_TITLE_ROW}", TITLE_FORMAT)
     ws.update([HISTORY_HEADER], f"A{HISTORY_HEADER_ROW}", value_input_option="USER_ENTERED")
     ws.format(f"A{HISTORY_HEADER_ROW}:I{HISTORY_HEADER_ROW}", HEADER_FORMAT)
