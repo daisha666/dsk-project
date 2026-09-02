@@ -93,6 +93,39 @@ def is_class_included(race_class):
     return classify_class_tier(race_class) not in EXCLUDED_CLASS_TIERS
 
 
+# 買い目推奨ランク（S/A/B）の判定基準。S（現行確定基準）→A（やや広い参考
+# 範囲）→B（さらに緩い参考範囲）の順に緩くなる。A・Bの閾値は、Stage3の
+# グリッドサーチで探索した数値をそのまま採用すると多重比較の影響を受ける
+# ため使わず、キリの良い値（EV1.2・1.0、オッズ上限35倍）で機械的に
+# 区切った（ユーザー確定事項）。EV1.0は単勝の理論上の損益分岐点
+# （期待値1.0未満は平均的に損失が出る）であり、Bの下限として意味のある
+# 区切り。クラスフィルタ（1勝クラス以上限定）は3ランク共通で、EV・オッズの
+# 条件だけを緩める
+RANK_THRESHOLDS = [
+    ("S", 1.4, 30),  # Stage3確定基準（prediction/predict_race.py::EV_THRESHOLD/ODDS_CAPと同じ）
+    ("A", 1.2, 35),
+    ("B", 1.0, 35),
+]
+
+
+def classify_recommendation_rank(expected_value, market_odds, race_class, class_filter=True):
+    """期待値・オッズ・クラスから買い目推奨ランク（"S"/"A"/"B"/None）を判定する。
+    RANK_THRESHOLDSの順（厳しい方から）に判定し、最初に条件を満たした
+    1段階だけを返す（重複なし）。何も満たさなければNone"""
+    if expected_value is None or pd.isna(expected_value):
+        return None
+    if market_odds is None or pd.isna(market_odds):
+        return None
+    if class_filter and not is_class_included(race_class):
+        return None
+
+    for rank, ev_threshold, odds_cap in RANK_THRESHOLDS:
+        if expected_value >= ev_threshold and market_odds <= odds_cap:
+            return rank
+
+    return None
+
+
 def select_top1_per_race(candidates):
     """レースごとにexpected_valueが最大の1頭だけを残す
     （同値の場合は予測確率が高い方を採用。それも同値ならDataFrame内の出現順で先頭）"""

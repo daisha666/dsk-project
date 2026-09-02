@@ -222,14 +222,25 @@ th {
 .recommended-row {
   background: rgba(76, 208, 125, 0.08);
 }
-.badge-buy {
+.badge-rank {
   display: inline-block;
-  background: var(--good);
-  color: #05210f;
   font-weight: 700;
   border-radius: 4px;
   padding: 1px 6px;
   font-size: 0.7rem;
+}
+.badge-rank-S {
+  background: var(--good);
+  color: #05210f;
+}
+.badge-rank-A {
+  background: var(--accent);
+  color: #04121f;
+}
+.badge-rank-B {
+  background: var(--panel-alt);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
 }
 .table-scroll {
   overflow-x: auto;

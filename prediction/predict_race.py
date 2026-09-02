@@ -45,7 +45,7 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
-from ai.backtest import is_class_included
+from ai.backtest import classify_recommendation_rank, is_class_included
 from ai.build_dataset import (
     CATEGORICAL_COLUMNS,
     FEATURE_COLUMNS_A_ODDS_ADJUSTED,
@@ -97,16 +97,18 @@ def score_upcoming_races(model, log=print):
     scored["pred_win_prob"] = model.predict_proba(X)[:, 1]
     scored["expected_value"] = scored["pred_win_prob"] * scored["market_odds"]
 
-    ev_ok = scored["expected_value"] >= EV_THRESHOLD
-    odds_ok = scored["market_odds"] <= ODDS_CAP
-    if CLASS_FILTER:
-        # race_classはcategory dtypeのため、.apply()の戻り値もcategory dtypeに
-        # なることがあり、その場合bool同士の&演算ができずTypeErrorになる
-        # （dry run検証で発覚）。astype(bool)で明示的に素のbool型へ変換する
-        class_ok = scored["race_class"].apply(is_class_included).astype(bool)
-    else:
-        class_ok = True
-    scored["is_recommended"] = ev_ok & odds_ok & class_ok
+    # 買い目推奨ランク（S=現行確定基準・A/B=段階的に緩い参考範囲。
+    # ai/backtest.py::RANK_THRESHOLDS参照）。DataFrame.apply(axis=1)は
+    # race_classがcategory dtypeでも素のobject dtype（文字列/None混在）を
+    # 返すため、Series.apply()で以前発生したcategory dtype起因のTypeError
+    # （dry run検証で発覚）は起きない
+    scored["recommendation_rank"] = scored.apply(
+        lambda row: classify_recommendation_rank(
+            row["expected_value"], row["market_odds"], row["race_class"], class_filter=CLASS_FILTER
+        ),
+        axis=1,
+    )
+    scored["is_recommended"] = scored["recommendation_rank"].notna()
 
     return assign_marks(scored)
 
@@ -129,22 +131,23 @@ def print_report(scored, log=print):
         for _, row in display.iterrows():
             raw_rank = "-" if pd.isna(row["raw_rank"]) else f"{row['raw_rank']:.0f}"
             odds_rank = "-" if pd.isna(row["odds_adjusted_rank"]) else f"{row['odds_adjusted_rank']:.0f}"
+            rank_label = row["recommendation_rank"] or "－"
             log(f"{row['mark']:3s}{row['horse_number']:4.0f} {row['horse_name']:<14s}"
                 f"{raw_rank:>8s}{odds_rank:>10s}"
                 f"{row['market_odds']:8.1f}{row['pred_win_prob'] * 100:8.2f}%{row['expected_value']:7.2f}"
-                f"  {'買い' if row['is_recommended'] else ''}")
+                f"  {rank_label}")
 
     recommended = scored[scored["is_recommended"]].sort_values(
-        ["race_id", "expected_value"], ascending=[True, False]
+        ["race_id", "recommendation_rank", "expected_value"], ascending=[True, True, False]
     )
     log("")
     log("=" * 70)
     log(f"買い目推奨: {len(recommended)}点  "
-        f"（EV>={EV_THRESHOLD}・オッズ上限{ODDS_CAP}倍・"
+        f"（S: EV>=1.4・上限30倍 / A: EV>=1.2・上限35倍 / B: EV>=1.0・上限35倍・"
         f"{'1勝クラス以上限定' if CLASS_FILTER else '全クラス'}）")
     log("=" * 70)
     for _, row in recommended.iterrows():
-        log(f"  {row['race_date']} {row['course']}{row['round']:.0f}R "
+        log(f"  [{row['recommendation_rank']}] {row['race_date']} {row['course']}{row['round']:.0f}R "
             f"{row['horse_number']:.0f}番 {row['horse_name']}"
             f"（オッズ{row['market_odds']:.1f}倍 EV{row['expected_value']:.2f}）")
 

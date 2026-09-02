@@ -84,7 +84,7 @@ def run_odds_refresh_job(log=print):
     log("predict_race.py: 予測勝率キャッシュ（predictionsテーブル）を使い期待値を再計算")
     from prediction.predict_race import save_predictions_to_db
     from ai.build_dataset import build_upcoming_dataset
-    from ai.backtest import is_class_included
+    from ai.backtest import classify_recommendation_rank
     from prediction.predict_race import EV_THRESHOLD, ODDS_CAP, CLASS_FILTER, assign_marks
     from prediction.generate_report import generate_site
     import pandas as pd
@@ -112,16 +112,13 @@ def run_odds_refresh_job(log=print):
         return f"{len(updated_races)}レースのオッズを更新しましたが、予測キャッシュが無く期待値を再計算できません"
 
     upcoming["expected_value"] = upcoming["pred_win_prob"] * upcoming["market_odds"]
-    ev_ok = upcoming["expected_value"] >= EV_THRESHOLD
-    odds_ok = upcoming["market_odds"] <= ODDS_CAP
-    if CLASS_FILTER:
-        # race_classがcategory dtypeのため、.astype(bool)で素のbool型へ変換する
-        # （prediction/predict_race.py::score_upcoming_racesと同じ理由。
-        # dry run検証で発覚した不具合）
-        class_ok = upcoming["race_class"].apply(is_class_included).astype(bool)
-    else:
-        class_ok = True
-    upcoming["is_recommended"] = ev_ok & odds_ok & class_ok
+    upcoming["recommendation_rank"] = upcoming.apply(
+        lambda row: classify_recommendation_rank(
+            row["expected_value"], row["market_odds"], row["race_class"], class_filter=CLASS_FILTER
+        ),
+        axis=1,
+    )
+    upcoming["is_recommended"] = upcoming["recommendation_rank"].notna()
     scored = assign_marks(upcoming)
 
     n_saved = save_predictions_to_db(scored)

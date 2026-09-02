@@ -247,6 +247,13 @@ def render_date_index_page(race_date, race_infos):
 # レース予想（詳細）ページ
 # ------------------------------------------------------------
 
+def render_rank_badge(rank):
+    """買い目推奨ランク（S/A/B）のバッジHTMLを返す。ランク無し（None/NaN）は「－」"""
+    if rank is None or (isinstance(rank, float) and pd.isna(rank)):
+        return "－"
+    return f'<span class="badge-rank badge-rank-{rank}">{rank}</span>'
+
+
 def render_horse_row(h):
     raw_rank = "-" if pd.isna(h["raw_rank"]) else f"{h['raw_rank']:.0f}"
     odds_rank = "-" if pd.isna(h["odds_adjusted_rank"]) else f"{h['odds_adjusted_rank']:.0f}"
@@ -256,7 +263,7 @@ def render_horse_row(h):
     ev = "-" if pd.isna(h["expected_value"]) else f"{h['expected_value']:.2f}"
     mark_color = MARK_COLORS.get(h["mark"], "inherit")
     row_class = "recommended-row" if h["is_recommended"] else ""
-    badge = '<span class="badge-buy">買い</span>' if h["is_recommended"] else ""
+    badge = render_rank_badge(h["recommendation_rank"])
 
     return f"""
 <tr class="{row_class}">
@@ -274,10 +281,14 @@ def render_horse_row(h):
 
 
 def render_recommend_box(horses):
-    """このレースの買い目推奨（is_recommended=Trueの馬）を、従来ホーム1ページに
+    """このレースの買い目推奨（recommendation_rankがS/A/Bの馬）を、従来ホーム1ページに
     出していた買い目推奨サマリーと同じ見た目でレースごとに表示する。
+    ランクの厳しい順（S→A→B）・同ランク内はEVの高い順に並べる。
     推奨馬がいないレースでも、その旨が分かるようボックス自体は常に表示する"""
-    recommended = horses[horses["is_recommended"]].sort_values("expected_value", ascending=False)
+    recommended = horses[horses["is_recommended"]].copy()
+    rank_order = {"S": 0, "A": 1, "B": 2}
+    recommended["_rank_order"] = recommended["recommendation_rank"].map(rank_order)
+    recommended = recommended.sort_values(["_rank_order", "expected_value"], ascending=[True, False])
 
     if len(recommended) == 0:
         items = '<div class="recommend-item"><span>－</span></div>'
@@ -285,7 +296,7 @@ def render_recommend_box(horses):
     else:
         items = "".join(f"""
 <div class="recommend-item">
-  <span>{h["horse_number"]:.0f}番 {_esc(h["horse_name"])}</span>
+  <span>{render_rank_badge(h["recommendation_rank"])} {h["horse_number"]:.0f}番 {_esc(h["horse_name"])}</span>
   <span class="odds">EV {h["expected_value"]:.2f} / {h["market_odds"]:.1f}倍</span>
 </div>
 """ for _, h in recommended.iterrows())
@@ -306,8 +317,9 @@ def render_race_detail_page(race_info, horses, settings, generated_at):
     recommend_html = render_recommend_box(horses)
 
     settings_html = "".join([
-        f'<span>EV閾値 &gt;= {settings["ev_threshold"]}</span>',
-        f'<span>オッズ上限 {settings["odds_cap"]}倍</span>',
+        '<span>S: EV&gt;=1.4・上限30倍</span>',
+        '<span>A: EV&gt;=1.2・上限35倍</span>',
+        '<span>B: EV&gt;=1.0・上限35倍</span>',
         f'<span>{"1勝クラス以上限定" if settings["class_filter"] else "全クラス対象"}</span>',
         f'<span>更新: {generated_at}</span>',
     ])
