@@ -264,11 +264,27 @@ def append_verification_result(ws, rows, log=print):
 
 def ensure_chart(sh, ws, log=print):
     """回収率(%)の推移（実行履歴が元データ）の折れ線グラフを、S/A/Bランク別の
-    3本の系列で、まだ無ければ作成する"""
+    3本の系列で、まだ無ければ作成する。
+
+    Googleスプレッドシートは、元データが1件も無い状態でグラフを作成すると
+    seriesの色設定（colorStyle）等を保存せずに簡略化してしまう挙動がある
+    （実際に確認済み）。ensure_chart()は本来「実行履歴に1行追記した直後」に
+    呼ばれる設計だが、rebuild_layout()直後にensure_chart()だけを単独で
+    呼んだ場合（動作確認・シートリセット時等）は元データが無い状態で
+    グラフが作られてしまう。一度色無しで作られたグラフは「既にグラフが
+    ある」判定でスキップされ続け、後から実データが増えても自然には直らない
+    ため、既存グラフのseriesが空（＝壊れた状態）なら削除して作り直す"""
     meta = sh.fetch_sheet_metadata()
     sheet_meta = next((s for s in meta["sheets"] if s["properties"]["sheetId"] == ws.id), None)
-    if sheet_meta and sheet_meta.get("charts"):
-        return
+    existing_charts = sheet_meta.get("charts", []) if sheet_meta else []
+    if existing_charts:
+        series = existing_charts[0].get("spec", {}).get("basicChart", {}).get("series", [])
+        if series:
+            return
+        log("既存の回収率推移グラフのseriesが空（データ無しで作成された状態）のため作り直す")
+        sh.batch_update({"requests": [
+            {"deleteEmbeddedObject": {"objectId": c["chartId"]}} for c in existing_charts
+        ]})
 
     chart_end_row = HISTORY_START_ROW - 1 + MAX_CHART_ROWS
     series = []
