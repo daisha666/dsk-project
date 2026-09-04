@@ -92,6 +92,26 @@ FEATURE_COLUMNS = BASE_FEATURE_COLUMNS + MARKET_COLUMNS
 # （ai/model_a_odds_adjusted_ablation.py参照）
 FEATURE_COLUMNS_A_ODDS_ADJUSTED = FEATURE_COLUMNS + ["odds_adjusted_score"]
 
+# 数値特徴量（CATEGORICAL_COLUMNS以外）。全馬分がNULL（枠番確定直後でオッズ・
+# 馬体重がまだ収集されていない新規レース等）だと、pd.read_sql_queryの結果が
+# 全てNoneの列になりdtype=objectのままになる（数値+Noneの混在ならfloat64に
+# 自動で上がるが、全件Noneだとそうならない）。LightGBMはfloat列内のNaNは
+# 欠損値として扱えるが、dtype=objectの列は
+# 「ValueError: pandas dtypes must be int, float or bool」で拒否するため、
+# 明示的にfloat64へキャストしておく（2026-09-04、本番の枠番確定直後の
+# 実データで実際に発生）
+NUMERIC_FEATURE_COLUMNS = [
+    "round", "distance", "horse_number", "frame_number", "weight",
+    "overall_score", "market_odds", "market_popularity", "odds_adjusted_score",
+]
+
+
+def _coerce_numeric_dtypes(df):
+    for col in NUMERIC_FEATURE_COLUMNS:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df
+
 QUERY = """
     SELECT
         e.race_id,
@@ -185,6 +205,7 @@ def build_dataset(db=None):
     df["label"] = (df["finish_position"] == 1).astype(int)
     df = df.drop(columns=["finish_position", "stability_power"])
 
+    df = _coerce_numeric_dtypes(df)
     for col in CATEGORICAL_COLUMNS:
         df[col] = df[col].astype("category")
 
@@ -214,6 +235,7 @@ def build_upcoming_dataset(db=None):
     conn.close()
 
     df = df.drop(columns=["stability_power"])
+    df = _coerce_numeric_dtypes(df)
     for col in CATEGORICAL_COLUMNS:
         df[col] = df[col].astype("category")
 
