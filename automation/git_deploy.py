@@ -17,15 +17,25 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # pythonw.exe（コンソール無し）からgit.exe（コンソールアプリ）をsubprocessで
 # 呼ぶと、Windowsは子プロセス用に新しいコンソールウィンドウを生成するため、
-# オッズ自動更新のたびに黒い画面が一瞬表示されてしまう。
-# CREATE_NO_WINDOWでそれを抑止する（Windows専用フラグ）
-_NO_WINDOW_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+# オッズ自動更新のたびに黒い画面が一瞬表示されてしまう。CREATE_NO_WINDOW
+# （Windows専用フラグ）で抑止する。Windows 11では既定の端末アプリが
+# Windows Terminalになっており、CREATE_NO_WINDOW単体だと一瞬ウィンドウが
+# 表示されてしまう既知の事象があるため、念のためSTARTUPINFOでも
+# SW_HIDE（非表示）を明示し、二重に抑止する
+if sys.platform == "win32":
+    _NO_WINDOW_FLAGS = subprocess.CREATE_NO_WINDOW
+    _STARTUPINFO = subprocess.STARTUPINFO()
+    _STARTUPINFO.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    _STARTUPINFO.wShowWindow = subprocess.SW_HIDE
+else:
+    _NO_WINDOW_FLAGS = 0
+    _STARTUPINFO = None
 
 
 def _run(args, log):
     result = subprocess.run(
         args, cwd=PROJECT_ROOT, capture_output=True, text=True, encoding="utf-8",
-        creationflags=_NO_WINDOW_FLAGS,
+        creationflags=_NO_WINDOW_FLAGS, startupinfo=_STARTUPINFO,
     )
     if result.stdout.strip():
         log(result.stdout.strip())
