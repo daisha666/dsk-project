@@ -1,16 +1,30 @@
 """
 dsk_Project
-自動化ジョブ: ②オッズ取得・予想更新（軽量処理）
-Version 0.1
-
-PROJECT_EVのautomation/refresh_job.pyと同じ考え方: モデルの再学習は行わず、
-predictionsテーブルに保存済みの予測勝率（probability。predict_race.pyが
-直近の学習結果から書き込んだキャッシュ）をそのまま再利用し、最新の単勝・
-複勝オッズだけをcollectors/yahoo_denma_collector.py::fetch_tfw_oddsで
-再取得して、期待値・買い目推奨・docs/data/predictions.jsonを更新する。
+自動化ジョブ: ②オッズ取得・予想更新
+Version 0.2
 
 対象レース: entries はあるが結果はまだ確定していない（＝オッズが動き得る）
 レース（ai/build_dataset.py::build_upcoming_dataset と同じ条件）。
+
+v0.1ではPROJECT_EVのautomation/refresh_job.pyと同じ考え方（モデルの再学習は
+せず、predictionsテーブルの予測勝率をキャッシュとして再利用し、オッズだけ
+最新化する軽量設計）を採用していたが、2026-09-05の本番運用で重大な不具合が
+見つかったため撤回した。
+
+不具合の経緯: 枠番確定直後（オッズ・馬体重が未収集）に①データ取得・検証・
+予想生成を実行すると、market_odds等が全馬分NULLになり、
+model.predict_proba()がNaNの既定分岐へ収束してpred_win_probがレース内で
+ほぼ均一な無意味な値になる（README「既知の運用課題」参照）。v0.1の設計では
+この壊れた値がpredictionsテーブルにキャッシュされたまま、当日のオッズ自動
+更新サイクルで何度再実行されても再学習されず使われ続けてしまい、表示上は
+オッズが最新化されているため異常に気づきにくかった。
+
+対策として、キャッシュ再利用をやめ、predict_race.pyと同じくtrain_current_model()
+＋score_upcoming_races()を毎回フルで実行するよう変更した。8項目パイプライン・
+DB接続まわりの高速化（2026-09-04対応）により、全履歴での再学習＋全未確定
+レースの再スコアリングは約30秒程度で完了するため、5分おきの自動更新サイクル
+に十分収まる。これによりキャッシュの陳腐化・破損というクラスの不具合が
+構造的に発生しなくなる。
 """
 
 import sys
@@ -81,45 +95,18 @@ def run_odds_refresh_job(log=print):
     odds_builder = OddsScoreFeatureBuilder()
     odds_builder.build_for_races(updated_races, log=log)
 
-    log("predict_race.py: 予測勝率キャッシュ（predictionsテーブル）を使い期待値を再計算")
-    from prediction.predict_race import save_predictions_to_db
-    from ai.build_dataset import build_upcoming_dataset
-    from ai.backtest import classify_recommendation_rank
-    from prediction.predict_race import EV_THRESHOLD, ODDS_CAP, CLASS_FILTER, assign_marks
+    log("predict_race.py: モデルを再学習し、最新オッズで予測・期待値を再計算")
+    from prediction.predict_race import (
+        EV_THRESHOLD, ODDS_CAP, CLASS_FILTER,
+        save_predictions_to_db, score_upcoming_races, train_current_model,
+    )
     from prediction.generate_report import generate_site
     import pandas as pd
 
-    upcoming = build_upcoming_dataset()
-    if len(upcoming) == 0:
+    model = train_current_model(log=log)
+    scored = score_upcoming_races(model, log=log)
+    if len(scored) == 0:
         return f"{len(updated_races)}レースのオッズを更新しましたが、予測対象レースはありません"
-
-    cached_probs = db.fetchall("SELECT race_id, horse_id, probability FROM predictions")
-    prob_map = {(r, h): p for r, h, p in cached_probs}
-
-    upcoming = upcoming.copy()
-    upcoming["pred_win_prob"] = upcoming.apply(
-        lambda row: prob_map.get((row["race_id"], row["horse_id"])), axis=1
-    )
-    # 予測キャッシュが無い馬（初めてこのジョブより先にpredict_race.pyが
-    # 走っていない等）は期待値を計算できないため対象外にする
-    before = len(upcoming)
-    upcoming = upcoming[upcoming["pred_win_prob"].notna()].copy()
-    skipped = before - len(upcoming)
-    if skipped:
-        log(f"予測キャッシュが無い{skipped}頭はスキップ（先に①のジョブが必要）")
-
-    if len(upcoming) == 0:
-        return f"{len(updated_races)}レースのオッズを更新しましたが、予測キャッシュが無く期待値を再計算できません"
-
-    upcoming["expected_value"] = upcoming["pred_win_prob"] * upcoming["market_odds"]
-    upcoming["recommendation_rank"] = upcoming.apply(
-        lambda row: classify_recommendation_rank(
-            row["expected_value"], row["market_odds"], row["race_class"], class_filter=CLASS_FILTER
-        ),
-        axis=1,
-    )
-    upcoming["is_recommended"] = upcoming["recommendation_rank"].notna()
-    scored = assign_marks(upcoming)
 
     n_saved = save_predictions_to_db(scored)
 
