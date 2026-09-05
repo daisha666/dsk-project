@@ -17,25 +17,27 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # pythonw.exe（コンソール無し）からgit.exe（コンソールアプリ）をsubprocessで
 # 呼ぶと、Windowsは子プロセス用に新しいコンソールウィンドウを生成するため、
-# オッズ自動更新のたびに黒い画面が一瞬表示されてしまう。CREATE_NO_WINDOW
-# （Windows専用フラグ）で抑止する。Windows 11では既定の端末アプリが
-# Windows Terminalになっており、CREATE_NO_WINDOW単体だと一瞬ウィンドウが
-# 表示されてしまう既知の事象があるため、念のためSTARTUPINFOでも
-# SW_HIDE（非表示）を明示し、二重に抑止する
+# オッズ自動更新のたびに黒い画面が一瞬表示されてしまう。
+#
+# 対処の経緯（2026-09-05）: CREATE_NO_WINDOW単体、CREATE_NO_WINDOW+
+# STARTUPINFO(SW_HIDE)の組み合わせのいずれも、実機（Windows 11、既定の
+# 端末アプリ=Windows Terminal）で画面表示を完全には抑止できなかった
+# （STARTUPINFOのSTARTF_USESHOWWINDOW+SW_HIDEは「コンソールを作成してから
+# 隠す」動作のため、CREATE_NO_WINDOW＝「そもそも作成しない」と組み合わせると
+# 逆に一瞬の生成→非表示という流れになり、それが一瞬のウィンドウ表示として
+# 見えていた可能性がある）。STARTUPINFOを外し、CREATE_NO_WINDOWに
+# DETACHED_PROCESS（親のコンソールを一切引き継がない）を加えることで
+# より強く抑止する
 if sys.platform == "win32":
-    _NO_WINDOW_FLAGS = subprocess.CREATE_NO_WINDOW
-    _STARTUPINFO = subprocess.STARTUPINFO()
-    _STARTUPINFO.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-    _STARTUPINFO.wShowWindow = subprocess.SW_HIDE
+    _NO_WINDOW_FLAGS = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
 else:
     _NO_WINDOW_FLAGS = 0
-    _STARTUPINFO = None
 
 
 def _run(args, log):
     result = subprocess.run(
         args, cwd=PROJECT_ROOT, capture_output=True, text=True, encoding="utf-8",
-        creationflags=_NO_WINDOW_FLAGS, startupinfo=_STARTUPINFO,
+        creationflags=_NO_WINDOW_FLAGS, stdin=subprocess.DEVNULL,
     )
     if result.stdout.strip():
         log(result.stdout.strip())
