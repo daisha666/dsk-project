@@ -10,13 +10,23 @@ dsk_Projectはアプリが同一リポジトリの docs/ フォルダなので�
 """
 
 import subprocess
+import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
+# pythonw.exe（コンソール無し）からgit.exe（コンソールアプリ）をsubprocessで
+# 呼ぶと、Windowsは子プロセス用に新しいコンソールウィンドウを生成するため、
+# オッズ自動更新のたびに黒い画面が一瞬表示されてしまう。
+# CREATE_NO_WINDOWでそれを抑止する（Windows専用フラグ）
+_NO_WINDOW_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
 
 def _run(args, log):
-    result = subprocess.run(args, cwd=PROJECT_ROOT, capture_output=True, text=True, encoding="utf-8")
+    result = subprocess.run(
+        args, cwd=PROJECT_ROOT, capture_output=True, text=True, encoding="utf-8",
+        creationflags=_NO_WINDOW_FLAGS,
+    )
     if result.stdout.strip():
         log(result.stdout.strip())
     return result
