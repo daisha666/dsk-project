@@ -159,6 +159,19 @@ GASベースの「競馬予想2」で得られた知見――**オッズを反�
         することになるため）。①はオッズがある程度収集された状態（当日朝〜など）で実行するのが
         望ましい。前日実行が必要な場合は、翌朝オッズが集まった段階で①をもう一度実行するか、
         （今回の恒久対応により）②の自動更新サイクルが数分以内に正しい値へ上書きする
+- [x] **GitHub Pagesデプロイをdulwich（純粋Python実装）ベースに変更（2026-09-05〜06）**。
+      `automation/git_deploy.py`は元々git.exeをsubprocessで呼んでいたが、
+      pythonw.exe（コンソール無し）からコンソールアプリをsubprocessで呼ぶとWindowsが
+      子プロセス用のコンソールウィンドウを生成してしまい、オッズ自動更新のたびに黒い画面が
+      一瞬表示される問題があった。`CREATE_NO_WINDOW`単体→`+STARTUPINFO(SW_HIDE)`→
+      `+DETACHED_PROCESS`→PIPEをやめて一時ファイル経由、と段階的に対処を試みたが実機
+      （Windows 11）で解消しきれなかったため、外部プロセスを一切呼ばない
+      `dulwich`（純粋Pythonのgitクライアント）に切り替えた。認証はGit Credential Manager
+      の代わりにGitHub Personal Access Token（fine-grained、対象リポジトリの
+      Contents: Read and writeのみ）を`config/github_pat.txt`（`.gitignore`対象）に
+      保存し、push時にHTTPS URLへ埋め込む方式にした。実際にcommit・pushが成功する
+      ことを確認済み。PROJECT_EV側の`automation/git_deploy.py`（別リポジトリ
+      project-ev-appへのデプロイ）も同じ方式に変更した
 - [ ] **複勝・ワイドのバックテストは実行不可（データ不足）**: 単勝と同じ枠組みで複勝・ワイドの
       EVバックテスト（確定`payouts`ベース、EV閾値・オッズ上限のグリッドサーチ）を検討したが、
       過去3年分の収集データには複勝・ワイドの**発走前オッズが一切記録されていない**ことが判明した
