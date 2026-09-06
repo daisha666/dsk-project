@@ -11,7 +11,9 @@ dsk_Projectはアプリが同一リポジトリの docs/ フォルダなので�
 
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -19,26 +21,40 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # 呼ぶと、Windowsは子プロセス用に新しいコンソールウィンドウを生成するため、
 # オッズ自動更新のたびに黒い画面が一瞬表示されてしまう。
 #
-# 対処の経緯（2026-09-05）: CREATE_NO_WINDOW単体、CREATE_NO_WINDOW+
-# STARTUPINFO(SW_HIDE)の組み合わせのいずれも、実機（Windows 11、既定の
-# 端末アプリ=Windows Terminal）で画面表示を完全には抑止できなかった
-# （STARTUPINFOのSTARTF_USESHOWWINDOW+SW_HIDEは「コンソールを作成してから
-# 隠す」動作のため、CREATE_NO_WINDOW＝「そもそも作成しない」と組み合わせると
-# 逆に一瞬の生成→非表示という流れになり、それが一瞬のウィンドウ表示として
-# 見えていた可能性がある）。STARTUPINFOを外し、CREATE_NO_WINDOWに
-# DETACHED_PROCESS（親のコンソールを一切引き継がない）を加えることで
-# より強く抑止する
+# 対処の経緯（2026-09-05）: 以下をこの順に実機（Windows 11、既定の端末アプリ
+# =Windows Terminal）で試したが、いずれも画面表示を完全には抑止できなかった。
+#   1. CREATE_NO_WINDOW単体
+#   2. CREATE_NO_WINDOW + STARTUPINFO(SW_HIDE)
+#      （SW_HIDEは「作成してから隠す」動作のため、そもそも作成しない
+#      CREATE_NO_WINDOWと矛盾し、かえって一瞬の生成→非表示になっていた
+#      可能性がある）
+#   3. CREATE_NO_WINDOW | DETACHED_PROCESS
+#      （それでも改善せず。DETACHED_PROCESSは、標準出力/エラーをPIPEで
+#      リダイレクトする場合〔=capture_output=True。1〜3すべてで併用していた〕
+#      と組み合わせるとハンドル継承の都合でgit.exe側が結局コンソールを
+#      新規作成してしまう既知の非互換がある）
+# そこで、PIPEでのキャプチャ自体をやめ、一時ファイル経由で標準出力/エラーを
+# 受け取る方式に変更した（ハンドル継承の問題を避けるため）。フラグは
+# CREATE_NO_WINDOW単体に戻す
 if sys.platform == "win32":
-    _NO_WINDOW_FLAGS = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
+    _NO_WINDOW_FLAGS = subprocess.CREATE_NO_WINDOW
 else:
     _NO_WINDOW_FLAGS = 0
 
 
 def _run(args, log):
-    result = subprocess.run(
-        args, cwd=PROJECT_ROOT, capture_output=True, text=True, encoding="utf-8",
-        creationflags=_NO_WINDOW_FLAGS, stdin=subprocess.DEVNULL,
-    )
+    with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as out_f, \
+            tempfile.TemporaryFile(mode="w+", encoding="utf-8") as err_f:
+        proc = subprocess.run(
+            args, cwd=PROJECT_ROOT, stdout=out_f, stderr=err_f, stdin=subprocess.DEVNULL,
+            creationflags=_NO_WINDOW_FLAGS,
+        )
+        out_f.seek(0)
+        err_f.seek(0)
+        result = SimpleNamespace(
+            stdout=out_f.read(), stderr=err_f.read(), returncode=proc.returncode,
+        )
+
     if result.stdout.strip():
         log(result.stdout.strip())
     return result
