@@ -11,6 +11,7 @@
 <header>
   <h1><span class="logo">🏇</span>dsk_Project 予想</h1>
   <p class="subtitle">オッズを反映した最終指数（AK列相当）で印を決定する投資型競馬AI</p>
+  <div class="settings-bar" id="autorefresh-bar" style="justify-content:center;"></div>
 </header>
 <main class="container">
   <div class="date-list">
@@ -50,7 +51,41 @@
   <p><a href="https://github.com/daisha666/dsk-project" style="color:var(--accent)">daisha666/dsk-project</a></p>
 </footer>
 
+<script>
+const GAS_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbyB1YzzKjF5d4tIn7RXE6TULK4FcsbRm9IuRe-1stCO1pTiRxfrtBEdDISZxCswJLjk/exec";
+const GAS_SECRET_KEY = "7CGmsbp8IFy6oSbFwIHocp2fXzQ";
+const AUTOREFRESH_POLL_MS = 60000;
+
+async function pollAutoRefreshStatus() {
+  const bar = document.getElementById("autorefresh-bar");
+  if (!GAS_WEBAPP_URL) {
+    return;
+  }
+
+  try {
+    const url = `${GAS_WEBAPP_URL}?key=${encodeURIComponent(GAS_SECRET_KEY)}&action=autorefresh_status`;
+    const res = await fetch(url, { cache: "no-store" });
+    const data = await res.json();
+
+    if (data.status !== "ok") {
+      bar.innerHTML = `<span>オッズ自動更新: 状態取得エラー</span>`;
+      return;
+    }
+
+    const label = data.autoRefreshOn ? "🟢 オッズ自動更新: 稼働中" : "⚪ オッズ自動更新: 停止中";
+    const updated = data.lastUpdatedAt ? `（最終更新 ${data.lastUpdatedAt}）` : "";
+    bar.innerHTML = `<span>${label}${updated}</span>`;
+  } catch (e) {
+    bar.innerHTML = `<span>オッズ自動更新: 状態取得エラー</span>`;
+  }
+}
+
+pollAutoRefreshStatus();
+if (GAS_WEBAPP_URL) {
+  setInterval(pollAutoRefreshStatus, AUTOREFRESH_POLL_MS);
+}
+</script>
+
+
 </body>
 </html>
-<!-- deploy test 2026-09-08: SSH Deploy Key移行の動作確認用（無害） -->
-
