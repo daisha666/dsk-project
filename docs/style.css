@@ -157,15 +157,19 @@ h1 {
   margin: 0 0 10px;
 }
 .recommend-item {
-  display: flex;
-  justify-content: space-between;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
   gap: 4px 12px;
   padding: 6px 0;
   border-bottom: 1px solid var(--border);
   font-size: 0.85rem;
 }
 .recommend-item:last-child { border-bottom: none; }
+.recommend-item .recommend-jockey {
+  color: var(--text-dim);
+  white-space: nowrap;
+}
 .recommend-item .odds {
   color: var(--warn);
   white-space: nowrap;
@@ -205,11 +209,15 @@ th, td {
   white-space: nowrap;
 }
 th:nth-child(1), td:nth-child(1),
-th:nth-child(3), td:nth-child(3) {
+th:nth-child(4), td:nth-child(4) {
   text-align: center;
 }
-th:nth-child(2), td:nth-child(2) {
+th:nth-child(2), td:nth-child(2),
+th:nth-child(3), td:nth-child(3) {
   text-align: left;
+}
+.jockey-col {
+  color: var(--text-dim);
 }
 th {
   color: var(--text-dim);
