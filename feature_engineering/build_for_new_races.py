@@ -36,13 +36,12 @@ from feature_engineering.jockey_power import JockeyPowerFeatureBuilder
 from feature_engineering.kyakushitsu_power import KyakushitsuPowerFeatureBuilder
 from feature_engineering.odds_score import OddsScoreFeatureBuilder
 from feature_engineering.overall_score import OverallScoreFeatureBuilder
+from feature_engineering.pace_bias import PaceBiasFeatureBuilder
 from feature_engineering.pedigree_power import PedigreePowerFeatureBuilder
 from feature_engineering.stability_power import StabilityPowerFeatureBuilder
 from feature_engineering.trainer_power import TrainerPowerFeatureBuilder
 from feature_engineering.turn_power import TurnPowerFeatureBuilder
 
-# pace_bias_power（ペースバイアス補正）は未実装（feature_engineering/pace_bias.py参照。
-# 常にNULL=補正なしとして扱われるため、ここでは呼ばない）
 POWER_BUILDER_CLASSES = [
     AgariPowerFeatureBuilder,
     KyakushitsuPowerFeatureBuilder,
@@ -55,22 +54,28 @@ POWER_BUILDER_CLASSES = [
 ]
 
 
-def fetch_unconfirmed_race_ids(db=None):
-    """出馬表（entries）はあるが、まだ結果が確定していないrace_id一覧を返す
+def fetch_unconfirmed_race_ids(db=None, now=None):
+    """出馬表（entries）はあるが、まだ結果が確定しておらず発走前のrace_id一覧を返す
     （ai/build_dataset.py::UPCOMING_QUERYと同じ絞り込み条件。featuresの有無は
     問わない＝ここではfeaturesが無いレースも対象に含めたいため）。
     automation/denma_predict_job.pyが「今回新規に取得したrace_id」を厳密に
     追跡する代わりに使う。現在未確定の全レースを毎回対象にすることで、
-    過去に何らかの理由で特徴量計算が漏れたレースがあっても自然に追いつける"""
+    過去に何らかの理由で特徴量計算が漏れたレースがあっても自然に追いつける。
+    発走後のレースは特徴量も作り直さない（2026-09-28。before_post_clause参照）"""
+    from ai.build_dataset import before_post_clause
+
     if db is None:
         db = DatabaseManager()
 
-    rows = db.fetchall("""
+    clause, params = before_post_clause(now)
+    rows = db.fetchall(f"""
         SELECT DISTINCT e.race_id FROM entries e
-        WHERE e.race_id NOT IN (
+        JOIN races r ON r.race_id = e.race_id
+        WHERE {clause}
+          AND e.race_id NOT IN (
             SELECT DISTINCT race_id FROM results WHERE finish_position IS NOT NULL
         )
-    """)
+    """, params)
     return [r[0] for r in rows]
 
 
@@ -93,6 +98,9 @@ def build_features_for_races(race_ids, log=print):
 
     log("[OddsScoreFeatureBuilder] 計算中...")
     OddsScoreFeatureBuilder().build_for_races(race_ids, log=log)
+
+    log("[PaceBiasFeatureBuilder] 計算中...")
+    PaceBiasFeatureBuilder().build_for_races(race_ids, log=log)
 
     log(f"特徴量差分計算が完了: 対象レース数={len(race_ids)}")
 

@@ -36,6 +36,9 @@ TOP_PAGE_URL = f"{BASE_URL}/keiba/"
 
 MEETING_ID_PATTERN = re.compile(r"/keiba/race/list/(\d{8})")
 
+# レース一覧ページの日程表（table.hr-tableSchedule）の1列目「11R 15:30」-> ラウンド・発走時刻
+SCHEDULE_ROUND_TIME_PATTERN = re.compile(r"^(\d+)R\s*(\d{1,2}):(\d{2})")
+
 TITLE_DATE_PATTERN = re.compile(r"(\d{4})年(\d{1,2})月(\d{1,2})日")
 TITLE_COURSE_PATTERN = re.compile(r"）\s*(\S+?)競馬場")
 
@@ -115,6 +118,7 @@ class YahooDenmaCollector(BaseCollector):
         year, month, day = (int(v) for v in date_match.groups())
         course_match = TITLE_COURSE_PATTERN.search(title)
         course = course_match.group(1) if course_match else None
+        post_times = self.parse_post_times(soup)
 
         races = []
         for header in soup.find_all(["h2", "h3"]):
@@ -145,9 +149,26 @@ class YahooDenmaCollector(BaseCollector):
                 "race_class": race_class,
                 "direction": direction,
                 "age_condition": age_condition,
+                "post_time": post_times.get(int(round_no)),
             })
 
         return races
+
+    @staticmethod
+    def parse_post_times(soup):
+        """レース一覧ページの日程表（table.hr-tableSchedule。1列目が「1R 9:45」形式）から
+        {ラウンド: 'HH:MM'} を返す（races.post_time用。2026-09-28追加。発走後は予測を
+        作り直さない判定と、検証で発走前の最後の予測を選ぶのに使う）"""
+        post_times = {}
+        table = soup.find("table", class_="hr-tableSchedule")
+        if table is None:
+            return post_times
+        for tr in table.find_all("tr"):
+            cell = tr.find(["th", "td"])
+            m = SCHEDULE_ROUND_TIME_PATTERN.match(cell.get_text(" ", strip=True)) if cell else None
+            if m:
+                post_times[int(m.group(1))] = f"{int(m.group(2)):02d}:{m.group(3)}"
+        return post_times
 
     def has_result(self, race_id):
         """race/index/{race_id} に既に着順テーブルがあるかどうかを判定する。
@@ -373,19 +394,35 @@ class YahooDenmaCollector(BaseCollector):
     # DB保存
     # ------------------------------------------------------------
 
+    # races/entriesの保存は「ページに値がある項目だけ更新し、無い項目は既存の値を
+    # 残す」UPSERTにする（2026-09-28）。INSERT OR REPLACEは行ごと置き換えるため、
+    # ページに載っていない値（オッズ公開前に再取得した場合のオッズ・人気、
+    # 列に含めていない複勝オッズ帯・発走時刻など）をNULLで消してしまっていた
     def save_race(self, race):
         sql = """
-            INSERT OR REPLACE INTO races (
+            INSERT INTO races (
                 race_id, race_date, course, round, race_name,
                 distance, surface, track_condition, race_class,
-                direction, age_condition
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                direction, age_condition, post_time
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(race_id) DO UPDATE SET
+                race_date = COALESCE(excluded.race_date, races.race_date),
+                course = COALESCE(excluded.course, races.course),
+                round = COALESCE(excluded.round, races.round),
+                race_name = COALESCE(excluded.race_name, races.race_name),
+                distance = COALESCE(excluded.distance, races.distance),
+                surface = COALESCE(excluded.surface, races.surface),
+                track_condition = COALESCE(excluded.track_condition, races.track_condition),
+                race_class = COALESCE(excluded.race_class, races.race_class),
+                direction = COALESCE(excluded.direction, races.direction),
+                age_condition = COALESCE(excluded.age_condition, races.age_condition),
+                post_time = COALESCE(excluded.post_time, races.post_time)
         """
         self.db.execute(sql, (
             race["race_id"], race["race_date"], race["course"], race["round"],
             race["race_name"], race["distance"], race["surface"],
             race["track_condition"], race["race_class"], race["direction"],
-            race["age_condition"],
+            race["age_condition"], race["post_time"],
         ))
 
     def save_horse(self, horse_id, horse_name, sire, damsire):
@@ -402,11 +439,21 @@ class YahooDenmaCollector(BaseCollector):
 
     def save_entry(self, race_id, entry):
         sql = """
-            INSERT OR REPLACE INTO entries (
+            INSERT INTO entries (
                 race_id, horse_id, horse_number, frame_number,
                 horse_name, sex_age, weight, jockey, trainer,
                 odds, popularity
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(race_id, horse_id) DO UPDATE SET
+                horse_number = COALESCE(excluded.horse_number, entries.horse_number),
+                frame_number = COALESCE(excluded.frame_number, entries.frame_number),
+                horse_name = COALESCE(excluded.horse_name, entries.horse_name),
+                sex_age = COALESCE(excluded.sex_age, entries.sex_age),
+                weight = COALESCE(excluded.weight, entries.weight),
+                jockey = COALESCE(excluded.jockey, entries.jockey),
+                trainer = COALESCE(excluded.trainer, entries.trainer),
+                odds = COALESCE(excluded.odds, entries.odds),
+                popularity = COALESCE(excluded.popularity, entries.popularity)
         """
         self.db.execute(sql, (
             race_id, entry["horse_id"], entry["horse_number"], entry["frame_number"],

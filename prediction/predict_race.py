@@ -38,6 +38,7 @@ Stage3確定基準（README「Stage3としての基準値」参照）:
 """
 
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -65,10 +66,13 @@ PREDICTION_MARKS = ["◎", "○", "▲", "△", "☆"]
 
 
 def train_current_model(log=print):
-    """現時点で利用可能な全履歴データでモデルA'を学習する"""
+    """現時点で利用可能な全履歴データでモデルA'を学習する。
+    学習データの最終開催日をmodel.trained_through_に持たせる（予測スナップショットに記録するため）"""
     dataset = build_dataset()
     log(f"学習データ件数: {len(dataset)}（期間: {dataset['race_date'].min()} 〜 {dataset['race_date'].max()}）")
-    return train_model(dataset, FEATURE_COLUMNS_A_ODDS_ADJUSTED, CATEGORICAL_COLUMNS)
+    model = train_model(dataset, FEATURE_COLUMNS_A_ODDS_ADJUSTED, CATEGORICAL_COLUMNS)
+    model.trained_through_ = str(dataset["race_date"].max())
+    return model
 
 
 def assign_marks(scored):
@@ -85,9 +89,11 @@ def assign_marks(scored):
     return scored
 
 
-def score_upcoming_races(model, log=print):
-    """未確定レースを予測し、予測勝率・期待値・印・買い目推奨フラグを付けたDataFrameを返す"""
-    upcoming = build_upcoming_dataset()
+def score_upcoming_races(model, log=print, now=None):
+    """未確定・発走前のレースを予測し、予測勝率・期待値・印・買い目推奨フラグを付けた
+    DataFrameを返す。nowの時点で発走済みのレースは対象外（予測を作り直さない。
+    ai/build_dataset.py::before_post_clause参照）"""
+    upcoming = build_upcoming_dataset(now=now)
     if len(upcoming) == 0:
         log("予測対象レースがありません（未確定レースなし、または全馬デビュー戦のみ）")
         return upcoming
@@ -152,43 +158,79 @@ def print_report(scored, log=print):
             f"（オッズ{row['market_odds']:.1f}倍 EV{row['expected_value']:.2f}）")
 
 
-def save_predictions_to_db(scored, db=None):
-    """予測結果をpredictionsテーブルへ保存する（実運用の予測ログ）。
-    score=odds_adjusted_score、probability=pred_win_prob、rank=odds_adjusted_rankを
-    保存する。is_recommended（買い目推奨かどうか）はここでは保存せず、後から
-    analysis/prediction_verification.pyがmarket_odds・race_classを見て
-    再計算する（推奨ロジック自体が変わっても、過去に保存した予測ログの
-    score/probabilityは変えずに済むようにするため）。
-    レース発走までに複数回実行された場合はrace_id+horse_idで上書きされ、
-    常に最新の予測が残る"""
+def _num(value, cast=float):
+    """NaN/None→None、numpy型→Pythonの数値に変換する（SQLite保存用）"""
+    return None if value is None or pd.isna(value) else cast(value)
+
+
+def _text(value):
+    return None if value is None or pd.isna(value) else str(value)
+
+
+def save_predictions_to_db(scored, predicted_at, trained_through, db=None):
+    """予測結果を保存する（実運用の予測ログ）。2つのテーブルに書く:
+
+    predictions: レースごとの最新の予測（race_id+horse_idで上書き）。
+    prediction_snapshots: 予測を実行するたびに1件ずつ追加する記録（2026-09-28追加）。
+      予測値・表示した買い目推奨ランクに加え、その時点でモデルに入力した値
+      （オッズ・人気・overall_score・odds_adjusted_score・トラックバイアス・
+      馬体重など、時刻とともに変わるもの）を残す。検証は、レースごとに発走前の
+      最後のスナップショットを使う（analysis/prediction_verification.py）。
+      実運用とバックテストで推奨件数がずれたとき、入力値のどこが違ったかを
+      後から追えるようにするため。
+
+    predicted_at: 入力データを取り終えた後の時刻（datetime）。1回の実行で共通。
+    trained_through: 学習データの最終開催日（train_current_model()のmodel.trained_through_）"""
     if db is None:
         db = DatabaseManager()
 
     if len(scored) == 0:
         return 0
 
-    sql = """
-        INSERT INTO predictions (race_id, horse_id, score, probability, expected_value, rank)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(race_id, horse_id) DO UPDATE SET
-            score = excluded.score,
-            probability = excluded.probability,
-            expected_value = excluded.expected_value,
-            rank = excluded.rank
-    """
-    n = 0
+    predicted_at_text = predicted_at.strftime("%Y-%m-%d %H:%M:%S")
+    prediction_rows = []
+    snapshot_rows = []
     for _, row in scored.iterrows():
-        rank = None if pd.isna(row["odds_adjusted_rank"]) else int(row["odds_adjusted_rank"])
-        db.execute(sql, (
-            row["race_id"], row["horse_id"],
-            float(row["odds_adjusted_score"]) if not pd.isna(row["odds_adjusted_score"]) else None,
-            None if pd.isna(row["pred_win_prob"]) else float(row["pred_win_prob"]),
-            None if pd.isna(row["expected_value"]) else float(row["expected_value"]),
-            rank,
+        prediction_rows.append((
+            row["race_id"], row["horse_id"], _num(row["odds_adjusted_score"]),
+            _num(row["pred_win_prob"]), _num(row["expected_value"]), _num(row["odds_adjusted_rank"], int),
         ))
-        n += 1
+        snapshot_rows.append((
+            row["race_id"], row["horse_id"], predicted_at_text, "live", trained_through,
+            _num(row["pred_win_prob"]), _num(row["expected_value"]), _text(row["recommendation_rank"]),
+            _num(row["raw_rank"], int), _num(row["odds_adjusted_rank"], int),
+            _num(row["market_odds"]), _num(row["market_popularity"], int),
+            _num(row["overall_score"]), _num(row["odds_adjusted_score"]),
+            _num(row["bias_front_runner_score"]), _num(row["bias_inside_post_score"]),
+            _num(row["weight"]), _num(row["horse_number"], int), _num(row["frame_number"], int),
+            _text(row["track_condition"]),
+        ))
 
-    return n
+    conn = db.connect()
+    try:
+        conn.executemany("""
+            INSERT INTO predictions (race_id, horse_id, score, probability, expected_value, rank)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(race_id, horse_id) DO UPDATE SET
+                score = excluded.score,
+                probability = excluded.probability,
+                expected_value = excluded.expected_value,
+                rank = excluded.rank
+        """, prediction_rows)
+        conn.executemany("""
+            INSERT OR REPLACE INTO prediction_snapshots (
+                race_id, horse_id, predicted_at, source, trained_through,
+                probability, expected_value, recommendation_rank, raw_rank, odds_adjusted_rank,
+                market_odds, market_popularity, overall_score, odds_adjusted_score,
+                bias_front_runner_score, bias_inside_post_score,
+                weight, horse_number, frame_number, track_condition
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, snapshot_rows)
+        conn.commit()
+    finally:
+        conn.close()
+
+    return len(prediction_rows)
 
 
 def main():
@@ -201,10 +243,11 @@ def main():
     print("=" * 70)
 
     model = train_current_model()
-    scored = score_upcoming_races(model)
+    predicted_at = datetime.now()
+    scored = score_upcoming_races(model, now=predicted_at)
     print_report(scored)
 
-    n_saved = save_predictions_to_db(scored)
+    n_saved = save_predictions_to_db(scored, predicted_at, model.trained_through_)
     print()
     print(f"predictionsテーブルへ保存: {n_saved}件")
 

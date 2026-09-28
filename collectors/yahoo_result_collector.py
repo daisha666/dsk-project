@@ -77,6 +77,22 @@ UNORDERED_BET_TYPES = {"枠連", "馬連", "ワイド", "3連複"}
 
 HORSE_LINK_PATTERN = re.compile(r"/directory/horse/(\d+)/?$")
 
+# オッズ未取得率の異常検知しきい値。取消馬等による通常のオッズ欠損は、過去実績
+# （2023-07〜2026-08、272日分）で最大でも1開催あたり6/450件（約1.3%）程度のため、
+# それを大きく超える割合が出た場合は、少し時間を置いて1回だけ再取得を試みる
+# （2026-09-07追加）。
+# 追記（2026-09-28）: 9/5だけの単発の異常ではなく、レース翌日ごろに結果ページを
+# 取得すると確定オッズがまだ載っていないことが繰り返し起きていた（9/5・9/12・9/19・
+# 9/20・9/26）。当時は保存がINSERT OR REPLACEだったため、発走前のオッズ・人気が
+# NULLで上書きされていた。現在は保存をCOALESCE付きのUPSERTにしたため、ページに
+# 値が無い項目は既存の値（発走前のオッズ等）を残し、確定オッズが載った後の再取得で
+# 置き換わる（save_entry参照）。この警告は「確定オッズはまだ未取得」の意味になる
+ODDS_NULL_WARN_RATIO = 0.10
+ODDS_NULL_RETRY_WAIT_SEC = 60
+
+# 結果ページの「15:30発走」-> 発走時刻（races.post_time）
+POST_TIME_PATTERN = re.compile(r"(\d{1,2}):(\d{2})発走")
+
 
 class YahooResultCollector(BaseCollector):
     """Yahoo!スポーツナビ 競馬から結果・払戻金を取得し、
@@ -95,6 +111,8 @@ class YahooResultCollector(BaseCollector):
             "results": 0,
             "jump_races_skipped": 0,
             "entries_skipped_no_horse_number": 0,
+            "odds_null": 0,
+            "odds_anomaly_meetings": [],
             "errors": [],
         }
 
@@ -350,6 +368,10 @@ class YahooResultCollector(BaseCollector):
             frame_number = int(frame_text) if frame_text.isdigit() else None
             horse_number = int(umaban_text) if umaban_text.isdigit() else None
             finish_position = int(finish_text) if finish_text.isdigit() else None
+            # 着順欄が数字でない場合（中止・失格・取消・除外）は元のテキストを残す。
+            # 2026-09-29追加: これが無いと「取消・除外（全額返還）」と「中止・失格
+            # （払戻なしの負け）」を検証時に区別できず、後者も検証から漏れていた
+            finish_status = None if finish_position is not None else (finish_text or None)
 
             finish_time = None
             time_match = FINISH_TIME_PATTERN.match(time_text)
@@ -381,7 +403,7 @@ class YahooResultCollector(BaseCollector):
                 "sex_age": sex_age, "weight": weight,
                 "jockey": jockey, "trainer": trainer,
                 "odds": win_odds, "popularity": popularity,
-                "finish_position": finish_position, "finish_time": finish_time,
+                "finish_position": finish_position, "finish_status": finish_status, "finish_time": finish_time,
                 "win_odds": win_odds, "place_odds": place_odds,
                 "passing": passing, "last3f": last3f,
             })
@@ -397,6 +419,9 @@ class YahooResultCollector(BaseCollector):
 
         race_info = self.parse_race_info(soup)
 
+        post_match = POST_TIME_PATTERN.search(soup.get_text(" ", strip=True))
+        post_time = f"{int(post_match.group(1)):02d}:{post_match.group(2)}" if post_match else None
+
         race_row = {
             "race_id": race_id,
             "race_date": meeting_date.isoformat(),
@@ -409,6 +434,7 @@ class YahooResultCollector(BaseCollector):
             "race_class": race_info["race_class"],
             "direction": race_info["direction"],
             "age_condition": race_info["age_condition"],
+            "post_time": post_time,
             "is_jump": race_info["is_jump"],
         }
 
@@ -507,19 +533,35 @@ class YahooResultCollector(BaseCollector):
     # DB保存
     # ------------------------------------------------------------
 
+    # races/entries/resultsの保存は「ページに値がある項目だけ更新し、無い項目は
+    # 既存の値を残す」UPSERTにする（2026-09-28）。INSERT OR REPLACEは行ごと
+    # 置き換えるため、ページに載っていない値（確定前のオッズ・人気、列に含めて
+    # いない複勝オッズ帯・発走時刻など）をNULLで消してしまっていた
     def save_race(self, race):
         sql = """
-            INSERT OR REPLACE INTO races (
+            INSERT INTO races (
                 race_id, race_date, course, round, race_name,
                 distance, surface, track_condition, race_class,
-                direction, age_condition
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                direction, age_condition, post_time
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(race_id) DO UPDATE SET
+                race_date = COALESCE(excluded.race_date, races.race_date),
+                course = COALESCE(excluded.course, races.course),
+                round = COALESCE(excluded.round, races.round),
+                race_name = COALESCE(excluded.race_name, races.race_name),
+                distance = COALESCE(excluded.distance, races.distance),
+                surface = COALESCE(excluded.surface, races.surface),
+                track_condition = COALESCE(excluded.track_condition, races.track_condition),
+                race_class = COALESCE(excluded.race_class, races.race_class),
+                direction = COALESCE(excluded.direction, races.direction),
+                age_condition = COALESCE(excluded.age_condition, races.age_condition),
+                post_time = COALESCE(excluded.post_time, races.post_time)
         """
         self.db.execute(sql, (
             race["race_id"], race["race_date"], race["course"], race["round"],
             race["race_name"], race["distance"], race["surface"],
             race["track_condition"], race["race_class"], race["direction"],
-            race["age_condition"],
+            race["age_condition"], race["post_time"],
         ))
 
     def save_horse(self, horse_id, horse_name):
@@ -534,11 +576,21 @@ class YahooResultCollector(BaseCollector):
 
     def save_entry(self, race_id, row):
         sql = """
-            INSERT OR REPLACE INTO entries (
+            INSERT INTO entries (
                 race_id, horse_id, horse_number, frame_number,
                 horse_name, sex_age, weight, jockey, trainer,
                 odds, popularity
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(race_id, horse_id) DO UPDATE SET
+                horse_number = COALESCE(excluded.horse_number, entries.horse_number),
+                frame_number = COALESCE(excluded.frame_number, entries.frame_number),
+                horse_name = COALESCE(excluded.horse_name, entries.horse_name),
+                sex_age = COALESCE(excluded.sex_age, entries.sex_age),
+                weight = COALESCE(excluded.weight, entries.weight),
+                jockey = COALESCE(excluded.jockey, entries.jockey),
+                trainer = COALESCE(excluded.trainer, entries.trainer),
+                odds = COALESCE(excluded.odds, entries.odds),
+                popularity = COALESCE(excluded.popularity, entries.popularity)
         """
         self.db.execute(sql, (
             race_id, row["horse_id"], row["horse_number"], row["frame_number"],
@@ -548,13 +600,21 @@ class YahooResultCollector(BaseCollector):
 
     def save_result(self, race_id, row):
         sql = """
-            INSERT OR REPLACE INTO results (
-                race_id, horse_id, finish_position, finish_time,
+            INSERT INTO results (
+                race_id, horse_id, finish_position, finish_status, finish_time,
                 win_odds, place_odds, passing, last3f
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(race_id, horse_id) DO UPDATE SET
+                finish_position = COALESCE(excluded.finish_position, results.finish_position),
+                finish_status = COALESCE(excluded.finish_status, results.finish_status),
+                finish_time = COALESCE(excluded.finish_time, results.finish_time),
+                win_odds = COALESCE(excluded.win_odds, results.win_odds),
+                place_odds = COALESCE(excluded.place_odds, results.place_odds),
+                passing = COALESCE(excluded.passing, results.passing),
+                last3f = COALESCE(excluded.last3f, results.last3f)
         """
         self.db.execute(sql, (
-            race_id, row["horse_id"], row["finish_position"], row["finish_time"],
+            race_id, row["horse_id"], row["finish_position"], row.get("finish_status"), row["finish_time"],
             row["win_odds"], row["place_odds"], row["passing"], row["last3f"],
         ))
 
@@ -571,8 +631,53 @@ class YahooResultCollector(BaseCollector):
     # 全体オーケストレーション
     # ------------------------------------------------------------
 
+    def _collect_meeting_races(self, meeting, log=print):
+        """1開催日・1競馬場分の全レースを取得・保存する。
+        (この開催で新たに保存したentries件数, うちoddsがNULLだった件数) を返す
+        （collect()の異常検知・再取得判定に使う）"""
+        entries_saved = 0
+        odds_null = 0
+
+        for race_id in meeting["race_ids"]:
+            try:
+                race_row, horse_rows, payouts = self.fetch_race(
+                    race_id, meeting["meeting_date"], meeting["course"]
+                )
+            except Exception as exc:
+                self.stats["errors"].append(f"race {race_id}: {exc}")
+                continue
+
+            if race_row["is_jump"]:
+                self.stats["jump_races_skipped"] += 1
+                continue
+
+            self.save_race(race_row)
+            self.save_payouts(race_id, payouts)
+            self.stats["races"] += 1
+
+            for row in horse_rows:
+                self.save_horse(row["horse_id"], row["horse_name"])
+
+                if row["horse_number"] is None:
+                    self.stats["entries_skipped_no_horse_number"] += 1
+                else:
+                    self.save_entry(race_id, row)
+                    self.stats["entries"] += 1
+                    entries_saved += 1
+                    if row["odds"] is None:
+                        odds_null += 1
+                        self.stats["odds_null"] += 1
+
+                self.save_result(race_id, row)
+                self.stats["results"] += 1
+
+        return entries_saved, odds_null
+
     def collect(self, start_date, end_date, log=print):
-        """指定期間の確定済みレース結果・払戻金を取得してDBへ保存する"""
+        """指定期間の確定済みレース結果・払戻金を取得してDBへ保存する。
+        1開催のオッズ未取得率が異常に高い（ODDS_NULL_WARN_RATIO超）場合、
+        Yahoo側の一時的な反映遅れ等を疑い、少し時間を置いて1回だけ
+        再取得を試みる（2026-09-05に1開催まるごとオッズNULLになった事象への対策）"""
 
         meeting_ids = set()
         for year, month in self.months_between(start_date, end_date):
@@ -591,37 +696,28 @@ class YahooResultCollector(BaseCollector):
                 continue
 
             self.stats["meetings_matched"] += 1
-            log(f"[{meeting['meeting_date'].isoformat()}] {meeting['course']} "
-                f"({len(meeting['race_ids'])}レース) 取得中...")
+            meeting_label = f"[{meeting['meeting_date'].isoformat()}] {meeting['course']}"
+            log(f"{meeting_label} ({len(meeting['race_ids'])}レース) 取得中...")
 
-            for race_id in meeting["race_ids"]:
-                try:
-                    race_row, horse_rows, payouts = self.fetch_race(
-                        race_id, meeting["meeting_date"], meeting["course"]
+            entries_saved, odds_null = self._collect_meeting_races(meeting, log=log)
+
+            if entries_saved > 0 and odds_null / entries_saved > ODDS_NULL_WARN_RATIO:
+                log(f"{meeting_label}: オッズ未取得が{odds_null}/{entries_saved}件"
+                    f"（{odds_null / entries_saved * 100:.0f}%）と異常に多いため、"
+                    f"{ODDS_NULL_RETRY_WAIT_SEC}秒待って再取得します")
+                time.sleep(ODDS_NULL_RETRY_WAIT_SEC)
+                entries_saved2, odds_null2 = self._collect_meeting_races(meeting, log=log)
+
+                if entries_saved2 > 0 and odds_null2 / entries_saved2 > ODDS_NULL_WARN_RATIO:
+                    log(f"⚠️ {meeting_label}: 再取得後もオッズ未取得が{odds_null2}/{entries_saved2}件"
+                        f"（{odds_null2 / entries_saved2 * 100:.0f}%）残っています。"
+                        "手動での確認・再実行を推奨します。")
+                    self.stats["odds_anomaly_meetings"].append(
+                        f"{meeting['meeting_date'].isoformat()} {meeting['course']}"
+                        f"（再取得後も{odds_null2}/{entries_saved2}件NULL）"
                     )
-                except Exception as exc:
-                    self.stats["errors"].append(f"race {race_id}: {exc}")
-                    continue
-
-                if race_row["is_jump"]:
-                    self.stats["jump_races_skipped"] += 1
-                    continue
-
-                self.save_race(race_row)
-                self.save_payouts(race_id, payouts)
-                self.stats["races"] += 1
-
-                for row in horse_rows:
-                    self.save_horse(row["horse_id"], row["horse_name"])
-
-                    if row["horse_number"] is None:
-                        self.stats["entries_skipped_no_horse_number"] += 1
-                    else:
-                        self.save_entry(race_id, row)
-                        self.stats["entries"] += 1
-
-                    self.save_result(race_id, row)
-                    self.stats["results"] += 1
+                else:
+                    log(f"{meeting_label}: 再取得で解消しました（オッズ未取得 {odds_null2}/{entries_saved2}件）")
 
         return self.stats
 

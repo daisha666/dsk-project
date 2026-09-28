@@ -38,6 +38,7 @@ sys.path.append(str(PROJECT_ROOT))
 
 from ai.backtest import classify_class_tier
 from config.config import PROJECT_ROOT as CONFIG_PROJECT_ROOT
+from database.db_manager import DatabaseManager
 
 OUTPUT_DIR = CONFIG_PROJECT_ROOT / "docs"
 
@@ -78,6 +79,23 @@ def page_shell(title, body_html, css_href):
 </body>
 </html>
 """
+
+
+def _horse_label(h):
+    """馬番・馬名の表示用ラベルを返す（例:「10番 ヴァルキリーバース」）。
+    騎手名は_jockey_label()で別列に分けて表示する（2026-09-19、括弧書きから
+    列分割表示へ変更）"""
+    return f'{h["horse_number"]:.0f}番 {_esc(h["horse_name"])}'
+
+
+def _jockey_label(h):
+    """騎手名の表示用ラベルを返す。枠番確定直後等、騎手がまだ収集できていない
+    馬はDB上NULL（pandasではNaN）になり得るため、真偽値化ではなくpd.isna()で
+    判定する（NaNが「nan」という文字列として表示されてしまうバグを避けるため）"""
+    jockey = h.get("jockey")
+    if pd.isna(jockey) or not str(jockey).strip():
+        return "－"
+    return _esc(jockey)
 
 
 def race_badge(race_class):
@@ -136,6 +154,7 @@ def render_root_index_page(dates):
 <header>
   <h1><span class="logo">🏇</span>dsk_Project 予想</h1>
   <p class="subtitle">オッズを反映した最終指数（AK列相当）で印を決定する投資型競馬AI</p>
+  <div class="settings-bar" id="autorefresh-bar" style="justify-content:center;"></div>
 </header>
 <main class="container">
   {list_html}
@@ -144,6 +163,7 @@ def render_root_index_page(dates):
   <p>素点順位＝overall_scoreのレース内順位（オッズ反映前） / オッズ後順位＝odds_adjusted_scoreのレース内順位（印の基準）</p>
   <p><a href="https://github.com/daisha666/dsk-project" style="color:var(--accent)">daisha666/dsk-project</a></p>
 </footer>
+{AUTOREFRESH_SCRIPT}
 """
     return page_shell("dsk_Project 予想 | 開催日一覧", body, css_href="style.css")
 
@@ -268,7 +288,8 @@ def render_horse_row(h):
     return f"""
 <tr class="{row_class}">
   <td class="mark" style="color:{mark_color}">{h["mark"] or ""}</td>
-  <td>{h["horse_number"]:.0f}番 {_esc(h["horse_name"])}</td>
+  <td>{_horse_label(h)}</td>
+  <td class="jockey-col">{_jockey_label(h)}</td>
   <td>{raw_rank}</td>
   <td>{odds_rank}</td>
   <td>{odds}</td>
@@ -296,7 +317,8 @@ def render_recommend_box(horses):
     else:
         items = "".join(f"""
 <div class="recommend-item">
-  <span>{render_rank_badge(h["recommendation_rank"])} {h["horse_number"]:.0f}番 {_esc(h["horse_name"])}</span>
+  <span class="recommend-horse">{render_rank_badge(h["recommendation_rank"])} {_horse_label(h)}</span>
+  <span class="recommend-jockey">{_jockey_label(h)}</span>
   <span class="odds">EV {h["expected_value"]:.2f} / {h["market_odds"]:.1f}倍</span>
 </div>
 """ for _, h in recommended.iterrows())
@@ -340,7 +362,7 @@ def render_race_detail_page(race_info, horses, settings, generated_at):
       <table>
         <thead>
           <tr>
-            <th>印</th><th>馬</th><th>素点順位</th><th>オッズ後順位</th>
+            <th>印</th><th>馬</th><th>騎手</th><th>素点順位</th><th>オッズ後順位</th>
             <th>オッズ</th><th>人気</th><th>予測勝率</th><th>EV</th><th></th>
           </tr>
         </thead>
@@ -374,12 +396,28 @@ def write_date_index(race_date, race_infos, date_dir):
     return path
 
 
+def fetch_predicted_race_infos(race_date):
+    """その開催日で一度でも予想ページを作ったレース（predictionsに行があるレース）の
+    一覧を返す。発走後のレースは作り直さなくなったため（2026-09-28）、開催日の
+    一覧ページはscored（今回作り直したレースだけ）ではなくDBから組み立てる"""
+    rows = DatabaseManager().fetchall("""
+        SELECT DISTINCT r.race_id, r.course, r.round, r.race_name, r.race_class
+        FROM races r JOIN predictions p ON p.race_id = r.race_id
+        WHERE r.race_date = ?
+    """, (str(race_date),))
+    return [{"race_id": race_id, "course": course, "round": round_no, "race_name": race_name,
+             "race_class": race_class} for race_id, course, round_no, race_name, race_class in rows]
+
+
 def generate_site(scored, settings, generated_at, log=print):
     """score_upcoming_races()が返すscored（DataFrame。0行でも可）から、
-    docs/{race_date}/index.html・docs/{race_date}/race_{race_id}.htmlを
-    開催日・レースごとに生成し、最後にホーム画面（docs/index.html）を
-    直近開催日一覧で再構築する。settingsは
-    {"ev_threshold":..., "odds_cap":..., "class_filter":...}"""
+    docs/{race_date}/race_{race_id}.html（scoredに含まれるレースだけ）と
+    docs/{race_date}/index.html（その開催日の全レース）を生成し、最後にホーム画面
+    （docs/index.html）を直近開催日一覧で再構築する。発走後のレースはscoredに
+    含まれないため、ページは発走前の最後の版のまま残る。settingsは
+    {"ev_threshold":..., "odds_cap":..., "class_filter":...}。
+    呼び出し前にsave_predictions_to_db()でpredictionsへ保存しておくこと
+    （開催日の一覧はpredictionsから組み立てる）"""
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     if len(scored) == 0:
@@ -393,7 +431,6 @@ def generate_site(scored, settings, generated_at, log=print):
         date_dir = OUTPUT_DIR / str(race_date)
         date_dir.mkdir(parents=True, exist_ok=True)
 
-        race_infos = []
         for race_id, race_group in date_group.groupby("race_id"):
             info = race_group.iloc[0]
             race_info = {
@@ -407,15 +444,9 @@ def generate_site(scored, settings, generated_at, log=print):
             }
             horses = race_group.sort_values("odds_adjusted_rank", na_position="last")
             write_race_page(race_id, race_info, horses, settings, generated_at, date_dir)
-            race_infos.append({
-                "race_id": race_id,
-                "course": info["course"],
-                "round": info["round"],
-                "race_name": info["race_name"],
-                "race_class": info["race_class"],
-            })
             n_races += 1
 
+        race_infos = fetch_predicted_race_infos(race_date)
         race_infos.sort(key=lambda r: (r["course"], r["round"]))
         write_date_index(race_date, race_infos, date_dir)
         n_dates += 1

@@ -21,6 +21,11 @@ PROJECT_EVとの最大の違い（本プロジェクトの主眼）:
 
 除外する行・レース:
   - results.finish_position が NULL の行（出走取消・競走中止等）
+  - entries.odds（market_odds）が NULL の行（2026-09-28追加）。結果取得③が
+    確定オッズの未掲載ページでオッズをNULLに上書きしていた不具合で、1開催まるごと
+    NULLの行が学習に混ざり、LightGBMがその少数の行から「NULLのときの分岐」を学んで、
+    人気が未取得のまま予測する実運用で予測勝率が約4割膨らんでいた（9/20・9/22）。
+    上書き自体はコレクター側で防いだが、残っているNULL行を学習に入れない
   - 出走馬全員が「過去走データなし」のレース。PROJECT_EVはavg_finish
     （直近5走平均着順）のNULL判定を使っていたが、dsk_Projectの
     overall_scoreは常に数値（欠損項目はCOALESCEで0として合算される。
@@ -52,6 +57,7 @@ odds_adjusted_score列について（ai/model_a_odds_adjusted_ablation.py用）:
 """
 
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -88,9 +94,16 @@ BASE_FEATURE_COLUMNS = CATEGORICAL_COLUMNS + [
 # 市場情報を含めた特徴量（本プロジェクトの主眼となるモデル）
 FEATURE_COLUMNS = BASE_FEATURE_COLUMNS + MARKET_COLUMNS
 
+# 同日トラックバイアス補正列（2026-09-07追加。feature_engineering/pace_bias.py）。
+# overall_scoreの乗算補正（未使用のpace_bias_adjustment列）には混ぜず、独立した
+# LightGBM特徴量として追加する（ai/track_bias_experiment.pyで検証した設計をそのまま反映。
+# README「トラックバイアス補正の実装（2026-09-07）」参照）
+TRACK_BIAS_COLUMNS = ["bias_front_runner_score", "bias_inside_post_score"]
+
 # 検証専用: モデルA（市場情報あり）にodds_adjusted_scoreを追加したもの
-# （ai/model_a_odds_adjusted_ablation.py参照）
-FEATURE_COLUMNS_A_ODDS_ADJUSTED = FEATURE_COLUMNS + ["odds_adjusted_score"]
+# （ai/model_a_odds_adjusted_ablation.py参照）。本番モデル（predict_race.py::
+# train_current_model）はこれにTRACK_BIAS_COLUMNSを加えたものを使う
+FEATURE_COLUMNS_A_ODDS_ADJUSTED = FEATURE_COLUMNS + ["odds_adjusted_score"] + TRACK_BIAS_COLUMNS
 
 # 数値特徴量（CATEGORICAL_COLUMNS以外）。全馬分がNULL（枠番確定直後でオッズ・
 # 馬体重がまだ収集されていない新規レース等）だと、pd.read_sql_queryの結果が
@@ -103,6 +116,7 @@ FEATURE_COLUMNS_A_ODDS_ADJUSTED = FEATURE_COLUMNS + ["odds_adjusted_score"]
 NUMERIC_FEATURE_COLUMNS = [
     "round", "distance", "horse_number", "frame_number", "weight",
     "overall_score", "market_odds", "market_popularity", "odds_adjusted_score",
+    "bias_front_runner_score", "bias_inside_post_score",
 ]
 
 
@@ -111,6 +125,23 @@ def _coerce_numeric_dtypes(df):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
+
+
+def before_post_clause(now=None, alias="r"):
+    """「まだ発走していないレース」のSQL条件（races表の別名alias）と、その
+    パラメータを返す。予測の作り直し・オッズ再取得・特徴量計算の対象を揃えるため、
+    ここ1か所で定義する（2026-09-28追加）。
+
+    発走後も予測を作り直していたため、検証・DBに残るのが発走後の値になり、
+    発走前に実際に表示していた推奨と食い違っていた（土曜のレースは日曜の夕方まで
+    作り直されていた）。発走時刻が未取得のレースは、従来どおりその開催日の間は
+    対象に残す（races.post_time参照）。
+    now: 省略時は現在時刻。テスト用に任意の時刻を注入できる"""
+    now = now or datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    sql = (f"({alias}.race_date > ? OR ({alias}.race_date = ? "
+           f"AND ({alias}.post_time IS NULL OR {alias}.post_time > ?)))")
+    return sql, (today, today, now.strftime("%H:%M"))
 
 QUERY = """
     SELECT
@@ -134,6 +165,8 @@ QUERY = """
         e.popularity AS market_popularity,
         f.overall_score,
         f.odds_adjusted_score,
+        f.bias_front_runner_score,
+        f.bias_inside_post_score,
         f.stability_power,
         res.finish_position
     FROM entries e
@@ -144,13 +177,15 @@ QUERY = """
     ORDER BY r.race_date, e.race_id, e.horse_number
 """
 
-# build_dataset()と同じ列だが、まだ結果が確定していない（＝これから予測したい）
-# レースだけに絞り込む。prediction/predict_race.py専用
+# build_dataset()と同じ列だが、まだ結果が確定しておらず、かつ発走前の
+# （＝これから予測したい）レースだけに絞り込む。prediction/predict_race.py専用。
+# {before_post}はbefore_post_clause()で埋める
 UPCOMING_QUERY = """
     SELECT
         e.race_id,
         e.horse_id,
         h.horse_name,
+        e.jockey,
         r.race_date,
         r.course,
         r.round,
@@ -169,6 +204,8 @@ UPCOMING_QUERY = """
         e.popularity AS market_popularity,
         f.overall_score,
         f.odds_adjusted_score,
+        f.bias_front_runner_score,
+        f.bias_inside_post_score,
         f.raw_rank,
         f.odds_adjusted_rank,
         f.stability_power
@@ -176,7 +213,8 @@ UPCOMING_QUERY = """
     JOIN races r ON r.race_id = e.race_id
     JOIN horses h ON h.horse_id = e.horse_id
     JOIN features f ON f.race_id = e.race_id AND f.horse_id = e.horse_id
-    WHERE e.race_id NOT IN (
+    WHERE {before_post}
+      AND e.race_id NOT IN (
         SELECT DISTINCT race_id FROM results WHERE finish_position IS NOT NULL
     )
     ORDER BY r.race_date, e.race_id, e.horse_number
@@ -197,6 +235,10 @@ def build_dataset(db=None):
     df = df[df["finish_position"].notna()].copy()
     excluded_no_result = before - len(df)
 
+    before = len(df)
+    df = df[df["market_odds"].notna()].copy()
+    excluded_no_odds = before - len(df)
+
     total_races_before_debut_filter = df["race_id"].nunique()
     race_all_debut = df.groupby("race_id")["stability_power"].transform(lambda s: s.isna().all())
     excluded_debut_races = df.loc[race_all_debut, "race_id"].nunique()
@@ -210,14 +252,15 @@ def build_dataset(db=None):
         df[col] = df[col].astype("category")
 
     df.attrs["excluded_no_result"] = excluded_no_result
+    df.attrs["excluded_no_odds"] = excluded_no_odds
     df.attrs["excluded_debut_races"] = excluded_debut_races
     df.attrs["total_races_before_debut_filter"] = total_races_before_debut_filter
 
     return df
 
 
-def build_upcoming_dataset(db=None):
-    """まだ結果が確定していないレースを、build_dataset()と同じ特徴量の形で
+def build_upcoming_dataset(db=None, now=None):
+    """まだ結果が確定しておらず、発走前のレースを、build_dataset()と同じ特徴量の形で
     pandas DataFrameとして返す（labelは無い。予測対象を作るための関数）。
     build_dataset()（学習用）とは異なり、出走馬全員が過去走データなしの
     レース（新馬戦等）も除外しない。表示対象のレース一覧に穴を開けない
@@ -226,12 +269,13 @@ def build_upcoming_dataset(db=None):
     信頼度は下がる）。新馬戦・未勝利戦はai/backtest.py::EXCLUDED_CLASS_TIERSに
     より買い目推奨の対象からは別途除外されるため、ここで除いておく必要はない。
     raw_rank・odds_adjusted_rankは特徴量としては使わないが、アプリ表示用に残す
-    （prediction/predict_race.py参照）"""
+    （prediction/predict_race.py参照）。nowはbefore_post_clause()参照"""
     if db is None:
         db = DatabaseManager()
 
+    clause, params = before_post_clause(now)
     conn = db.connect()
-    df = pd.read_sql_query(UPCOMING_QUERY, conn)
+    df = pd.read_sql_query(UPCOMING_QUERY.format(before_post=clause), conn, params=params)
     conn.close()
 
     df = df.drop(columns=["stability_power"])
@@ -254,6 +298,7 @@ if __name__ == "__main__":
     print()
     print(f"データセット件数: {len(dataset)}")
     print(f"除外件数（finish_position NULL）: {dataset.attrs['excluded_no_result']}")
+    print(f"除外件数（オッズ NULL）: {dataset.attrs['excluded_no_odds']}")
     excluded_races = dataset.attrs["excluded_debut_races"]
     total_races = dataset.attrs["total_races_before_debut_filter"]
     pct = excluded_races / total_races * 100 if total_races else 0

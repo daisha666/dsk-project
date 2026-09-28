@@ -22,7 +22,11 @@ CREATE TABLE IF NOT EXISTS races (
     track_condition TEXT,
     race_class TEXT,
     direction TEXT,
-    age_condition TEXT
+    age_condition TEXT,
+
+    -- 発走時刻 'HH:MM'（2026-09-28追加。発走後は予測を作り直さない判定と、
+    -- 検証で「発走前の最後の予測」を選ぶために使う。出馬表・結果の両コレクターが書き込む）
+    post_time TEXT
 
 );
 
@@ -64,6 +68,12 @@ CREATE TABLE IF NOT EXISTS results (
     horse_id TEXT,
 
     finish_position INTEGER,
+
+    -- 着順欄がfinish_positionに変換できなかった場合の元テキスト（'中止'・'失格'・
+    -- '取消'・'除外'等。2026-09-29追加）。中止・失格は競走成立後の脱落で払戻なし
+    -- （検証では「買ったが外れた」扱いに含める）。取消・除外はレース不成立で
+    -- 全額返還されるため、検証対象（S/A/B買い目推奨の集計）からは除く
+    finish_status TEXT,
 
     finish_time REAL,
 
@@ -182,8 +192,15 @@ CREATE TABLE IF NOT EXISTS features (
     trainer_power REAL,        -- 調教師力（調教師複勝率由来）
 
     -- ペースバイアス補正・総合力
-    pace_bias_adjustment REAL, -- 脚質別ペースバイアス補正（倍率）
+    pace_bias_adjustment REAL, -- 脚質別ペースバイアス補正（倍率）。未実装のまま常にNULL
+                               -- （2026-09-07、同日トラックバイアス実装により当面この形では使わない方針。
+                               -- feature_engineering/pace_bias.py参照）
     overall_score REAL,        -- 素点の総合力 = 8項目合計 × (1 + pace_bias_adjustment)
+
+    -- 同日トラックバイアス補正（2026-09-07追加。overall_scoreには含めず、
+    -- LightGBMの独立した特徴量として使う。feature_engineering/pace_bias.py参照）
+    bias_front_runner_score REAL, -- 同日・同競馬場で自分より前のレースの先行有利度（正=先行有利）
+    bias_inside_post_score REAL,  -- 同日・同競馬場で自分より前のレースの内枠有利度（正=内枠有利）
 
     -- オッズ由来の特徴量
     -- market_odds / market_popularityは未使用列（意図的に空のまま）。
@@ -224,3 +241,44 @@ CREATE TABLE IF NOT EXISTS predictions (
     PRIMARY KEY (race_id, horse_id)
 
 );
+
+------------------------------------------------------
+-- 予測スナップショット（2026-09-28追加）
+-- predictionsは「最新の1件」だけを上書き保存するため、発走後に作り直された値と
+-- 発走前に実際に表示していた値の区別がつかなかった。予測を実行するたびに、
+-- 予測値と、その時点でモデルに入力した値（時刻とともに変わるもの）を丸ごと残す。
+-- 検証（analysis/prediction_verification.py）は、レースごとに
+-- predicted_at < 発走時刻 の最後のスナップショットを使う。
+-- 発走後30日を過ぎたレースは、発走前の最後の1件を残して圧縮する。
+------------------------------------------------------
+CREATE TABLE IF NOT EXISTS prediction_snapshots (
+
+    race_id TEXT,
+    horse_id TEXT,
+    predicted_at TEXT,          -- 'YYYY-MM-DD HH:MM:SS'。1回の予測実行で共通（入力データ取得後の時刻）
+    source TEXT,                -- 'live'＝本番の予測実行 / 'git_backfill'＝docs/のgit履歴から復元（9/5〜9/27分）
+    trained_through TEXT,       -- 学習データの最終開催日
+
+    probability REAL,           -- 予測勝率
+    expected_value REAL,        -- 予測勝率 × market_odds
+    recommendation_rank TEXT,   -- 表示した買い目推奨ランク（S/A/B、該当なしはNULL）
+    raw_rank INTEGER,
+    odds_adjusted_rank INTEGER,
+
+    -- 予測に使った入力値（時刻とともに変わるもの。レース条件など固定の値はraces/entries参照）
+    market_odds REAL,
+    market_popularity INTEGER,  -- NULL＝人気未取得のまま予測した
+    overall_score REAL,
+    odds_adjusted_score REAL,
+    bias_front_runner_score REAL,
+    bias_inside_post_score REAL,
+    weight REAL,
+    horse_number INTEGER,
+    frame_number INTEGER,
+    track_condition TEXT,
+
+    PRIMARY KEY (race_id, horse_id, predicted_at)
+
+);
+
+CREATE INDEX IF NOT EXISTS idx_prediction_snapshots_race ON prediction_snapshots (race_id, predicted_at);

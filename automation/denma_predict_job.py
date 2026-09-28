@@ -51,11 +51,13 @@ def run_denma_predict_job(log=print):
         train_current_model,
     )
     from prediction.generate_report import generate_site
+    from datetime import datetime
     import pandas as pd
 
     model = train_current_model(log=log)
-    scored = score_upcoming_races(model, log=log)
-    n_saved = save_predictions_to_db(scored)
+    predicted_at = datetime.now()
+    scored = score_upcoming_races(model, log=log, now=predicted_at)
+    n_saved = save_predictions_to_db(scored, predicted_at, model.trained_through_)
 
     settings = {"ev_threshold": EV_THRESHOLD, "odds_cap": ODDS_CAP, "class_filter": CLASS_FILTER}
     generated_at = pd.Timestamp.now().isoformat()

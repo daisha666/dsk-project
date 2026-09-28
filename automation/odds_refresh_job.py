@@ -3,8 +3,9 @@ dsk_Project
 自動化ジョブ: ②オッズ取得・予想更新
 Version 0.2
 
-対象レース: entries はあるが結果はまだ確定していない（＝オッズが動き得る）
-レース（ai/build_dataset.py::build_upcoming_dataset と同じ条件）。
+対象レース: entries はあるが結果はまだ確定しておらず、かつ発走前
+（＝オッズが動き得る）のレース。ai/build_dataset.py::build_upcoming_dataset と
+同じ条件（find_active_race_ids参照）。
 
 v0.1ではPROJECT_EVのautomation/refresh_job.pyと同じ考え方（モデルの再学習は
 せず、predictionsテーブルの予測勝率をキャッシュとして再利用し、オッズだけ
@@ -36,14 +37,27 @@ sys.path.append(str(PROJECT_ROOT))
 from collectors.yahoo_denma_collector import YahooDenmaCollector
 from database.db_manager import DatabaseManager
 from feature_engineering.odds_score import OddsScoreFeatureBuilder
+from feature_engineering.pace_bias import PaceBiasFeatureBuilder
 
 
-def find_active_race_ids(db):
-    """entriesはあるが結果未確定（オッズが動き得る）レースのrace_id一覧を返す"""
-    rows = db.fetchall("""
+def find_active_race_ids(db, now=None):
+    """entriesはあるが結果未確定で、かつ発走前（オッズが動き得る）のレースの
+    race_id一覧を返す。
+
+    「結果未確定」だけを条件にすると、結果取得（③）が遅れている間は、既に終了した
+    レースまで対象に残り、確定後のオッズでレース前の予測ログを上書きしてしまう
+    （2026-09-21に開催日単位で除外、2026-09-28に発走時刻単位へ厳格化。
+    ai/build_dataset.py::before_post_clause参照）。
+    nowはテスト用に任意の時刻（datetime）を注入できる"""
+    from ai.build_dataset import before_post_clause
+
+    clause, params = before_post_clause(now)
+    rows = db.fetchall(f"""
         SELECT DISTINCT e.race_id FROM entries e
-        WHERE e.race_id NOT IN (SELECT DISTINCT race_id FROM results WHERE finish_position IS NOT NULL)
-    """)
+        JOIN races r ON r.race_id = e.race_id
+        WHERE {clause}
+          AND e.race_id NOT IN (SELECT DISTINCT race_id FROM results WHERE finish_position IS NOT NULL)
+    """, params)
     return [r[0] for r in rows]
 
 
@@ -73,7 +87,7 @@ def run_odds_refresh_job(log=print):
     race_ids = find_active_race_ids(db)
 
     if not race_ids:
-        return "対象レースなし（結果未確定のレースがありません）"
+        return "対象レースなし（発走前・結果未確定のレースがありません）"
 
     log(f"オッズ再取得対象: {len(race_ids)}レース")
     collector = YahooDenmaCollector()
@@ -95,20 +109,30 @@ def run_odds_refresh_job(log=print):
     odds_builder = OddsScoreFeatureBuilder()
     odds_builder.build_for_races(updated_races, log=log)
 
+    # トラックバイアスは対象レース自身のオッズ更新有無とは無関係に、同日に
+    # 新しく確定した先行レースの結果を反映する必要があるため、他の8項目と違い
+    # 毎サイクル対象レース全件（race_ids。オッズが更新できなかったレースも含む）
+    # を再計算する（feature_engineering/pace_bias.py参照）
+    log("トラックバイアスを再計算")
+    PaceBiasFeatureBuilder().build_for_races(race_ids, log=log)
+
     log("predict_race.py: モデルを再学習し、最新オッズで予測・期待値を再計算")
     from prediction.predict_race import (
         EV_THRESHOLD, ODDS_CAP, CLASS_FILTER,
         save_predictions_to_db, score_upcoming_races, train_current_model,
     )
     from prediction.generate_report import generate_site
+    from datetime import datetime
     import pandas as pd
 
     model = train_current_model(log=log)
-    scored = score_upcoming_races(model, log=log)
+    # オッズ取得後の時刻で絞り直す（取得中に発走したレースは予測も保存もしない）
+    predicted_at = datetime.now()
+    scored = score_upcoming_races(model, log=log, now=predicted_at)
     if len(scored) == 0:
         return f"{len(updated_races)}レースのオッズを更新しましたが、予測対象レースはありません"
 
-    n_saved = save_predictions_to_db(scored)
+    n_saved = save_predictions_to_db(scored, predicted_at, model.trained_through_)
 
     settings = {"ev_threshold": EV_THRESHOLD, "odds_cap": ODDS_CAP, "class_filter": CLASS_FILTER}
     generated_at = pd.Timestamp.now().isoformat()

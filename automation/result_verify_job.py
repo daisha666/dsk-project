@@ -29,6 +29,10 @@ def run_result_verify_job(log=print):
         log=log,
     )
     log(f"結果取得完了: レース={stats['races']} エントリ={stats['entries']}")
+    if stats["odds_anomaly_meetings"]:
+        log("⚠️ 結果ページに確定オッズがまだ無い開催があります（再取得を1回試行済み。"
+            "発走前のオッズを保持したまま。次回の結果取得で確定オッズに置き換わります）: "
+            + "、".join(stats["odds_anomaly_meetings"]))
 
     log("血統backfillを実行")
     race_ids = collector.fetch_race_ids_missing_pedigree()
@@ -36,8 +40,18 @@ def run_result_verify_job(log=print):
         pedigree_stats = collector.backfill_pedigrees(race_ids, log=log)
         log(f"血統backfill完了: {pedigree_stats}")
 
-    log("実運用予測ログの検証を実行")
-    from analysis.prediction_verification import fetch_resolved_predictions, summarize
+    log("実運用予測ログの検証を実行（発走前の最後の予測スナップショットで検証）")
+    from analysis.prediction_verification import (
+        compact_prediction_snapshots, count_unverifiable_races, fetch_resolved_predictions, summarize,
+    )
+
+    n_unverifiable = count_unverifiable_races()
+    if n_unverifiable:
+        log(f"⚠️ 発走時刻が不明、または発走前の予測が無いため検証対象外のレース: {n_unverifiable}件")
+
+    n_compacted = compact_prediction_snapshots()
+    if n_compacted:
+        log(f"古い予測スナップショットを圧縮: {n_compacted}行削除（発走前の最後の版は保持）")
 
     rows = fetch_resolved_predictions()
     if not rows:
