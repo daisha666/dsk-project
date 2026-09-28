@@ -9,14 +9,17 @@
  * watcher.py（Task Scheduler、5分おき実行）がB3のチェックを検知して
  * automation/odds_refresh_job.py を実行する。
  *
- * オッズ自動更新の状態フラグ（B5）について:
+ * オッズ自動更新スイッチ（B5）について（2026-09-08、時間指定トリガー方式から
+ * ユーザー操作のスイッチ方式へ変更）:
  *   B3（1回きりの実行トリガー、watcher.pyが拾って自動でOFFに戻す）とは別物。
- *   B5は「開催日の間、5分おきに自動更新し続けているかどうか」を示す状態フラグで、
- *   automation/odds_auto_refresh_job.py（Task Schedulerから直接、開催日
- *   9:30〜17:00に5分おきで起動される、watcher.pyのポーリングを経由しない
- *   独立ジョブ）が完全自動でON/OFFを読み書きする（ユーザー操作は無い）。
- *   このWebアプリ側はB5を読み取って状態表示するのみで、B5に書き込む
- *   エンドポイントは提供しない。
+ *   B5は「今、5分おきの自動更新を続けるかどうか」をユーザーが直接操作する
+ *   スイッチで、watcher.py（Task Scheduler、5分おき常時実行）が毎回
+ *   ポーリングして読み取り、ONならautomation/odds_refresh_job.pyを実行する。
+ *   停止し忘れ防止のため当日20時になるとwatcher.pyが自動でOFFに戻す。
+ *   旧方式（automation/odds_auto_refresh_job.py、開催日9:30〜17:00固定の
+ *   独立ジョブが完全自動でON/OFFしていた）は廃止した。このWebアプリ側は
+ *   従来通りB5を読み取って状態表示するのみで、B5に書き込むエンドポイントは
+ *   提供しない（書き込みはスプレッドシート上のチェックボックス操作のみ）。
  *
  * エンドポイント（PROJECT_EVのautomation/gas/odds_refresh_webapp.gsと同じ設計）:
  *   ?key=SECRET_KEY                            オッズ取得・予想更新リクエスト（B3をtrueにする）

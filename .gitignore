@@ -1,9 +1,9 @@
 # Google Sheets連携用の認証キー（秘密情報のためコミットしない）
 config/google_credentials.json
 
-# GitHub Personal Access Token（automation/git_deploy.pyのdulwich push用。
-# 秘密情報のためコミットしない）
-config/github_pat.txt
+# GitHub Deploy Key（automation/git_deploy.pyのdulwich+SSH push用。
+# 秘密鍵のためコミットしない。2026-09-08、PAT方式から移行済み）
+config/deploy_key_ed25519
 
 # SQLiteデータベース本体（サイズが大きいためリポジトリに含めない）
 database/dsk_project.db

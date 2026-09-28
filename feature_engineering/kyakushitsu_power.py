@@ -11,9 +11,15 @@ Version 0.2
 脚質区分の推定ロジック（Yahoo競馬の出馬表・結果ページには脚質そのものの
 表記が無いため、過去走のresults.passing（通過順位）から推定する。新規実装）:
   1. 各過去走について、passing（例:"06-06"や"01-01-02-03"）をコーナーごとの
-     通過順位のリストにパースし、その平均をそのレースの出走頭数
-     （field_size）で割って「早い/遅いの相対位置（0=先頭付近, 1=最後方付近）」
-     を求める。
+     通過順位のリストにパースし、**最終コーナー**（直線に入る直前）の通過順位を
+     そのレースの出走頭数（field_size）で正規化して「早い/遅いの相対位置
+     （0=先頭付近, 1=最後方付近）」を求める。
+     （2026-09-07変更。旧方式は記録された全コーナーの平均を使っていたが、
+     道中（1〜2コーナー等）の順位は隊列都合のノイズが乗りやすく、直線に
+     入る直前の位置取りの方が実際の脚質を反映しやすいという競馬の一般的な
+     見方に基づく。実データ14.5万走の診断で、逃げ/追込の勝率差が
+     旧方式16.36%/1.67%→新方式17.44%/1.25%と広がり、区分の切れ味が
+     向上することを確認済み。ai/kyakushitsu_style_diagnostic.py参照）
   2. 直近5走（agari_power.pyと同じ近走件数）のその相対位置を平均する。
   3. 平均相対位置をしきい値で4区分に分類する:
        <= 0.15        : 逃げ（先頭に近い位置を維持）
@@ -60,13 +66,14 @@ def parse_passing(passing):
 
 
 def compute_relative_position(passing, field_size):
-    """1走分の相対位置（0=先頭付近, 1=最後方付近）を返す。算出不能ならNone"""
+    """1走分の相対位置（0=先頭付近, 1=最後方付近）を、最終コーナー通過順位から
+    返す。算出不能ならNone（2026-09-07: 全コーナー平均→最終コーナーのみに変更）"""
     positions = parse_passing(passing)
     if not positions or not field_size or field_size <= 1:
         return None
-    avg_position = sum(positions) / len(positions)
+    final_position = positions[-1]
     # 頭数1頭（あり得ないが防御的に）の場合は上のfield_size<=1判定で弾く
-    return (avg_position - 1) / (field_size - 1)
+    return (final_position - 1) / (field_size - 1)
 
 
 def classify_running_style(relative_position):

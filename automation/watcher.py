@@ -35,13 +35,22 @@ from automation.odds_refresh_job import run_odds_refresh_job
 from automation.result_verify_job import run_result_verify_job
 from automation.sheet_control_panel import (
     ensure_control_panel,
+    get_auto_refresh_switch,
     get_sheet,
     read_jobs,
+    set_auto_refresh_last_updated,
+    set_auto_refresh_switch,
     set_job_done,
     set_job_running,
+    set_watcher_heartbeat,
 )
 
 POLL_INTERVAL_SEC = 300
+
+# オッズ自動更新スイッチ（操作パネルrow5）が当日この時刻を過ぎてもONのままなら、
+# 停止し忘れ防止のため自動的にOFFへ戻す（2026-09-08、時間指定トリガー方式から
+# スイッチ方式への変更に伴い追加）
+AUTO_REFRESH_FORCE_OFF_HOUR = 20
 
 JOB_RUNNERS = {
     "denma_predict": run_denma_predict_job,
@@ -86,7 +95,12 @@ def log_error(context, error_text):
     log(f"エラーを記録しました: {context}（詳細は {ERROR_LOG_FILE} を参照）")
 
 
-def poll_once():
+def poll_once(now=None):
+    """now: 省略時は実行時点の現在時刻（本番運用はこちら）。20時自動OFFの
+    動作確認のため、テスト時に架空の時刻を注入できるよう引数化している"""
+    if now is None:
+        now = datetime.now()
+
     try:
         sh = get_sheet()
         ws = ensure_control_panel(sh, log=log)
@@ -95,6 +109,11 @@ def poll_once():
         log_error("操作パネルへの接続に失敗しました（シートへのエラー記録は不可）",
                    traceback.format_exc())
         return
+
+    try:
+        set_watcher_heartbeat(ws, now)
+    except Exception:
+        log("ハートビート書き込みに失敗（処理は継続）")
 
     any_ran = False
     for job in jobs:
@@ -112,6 +131,22 @@ def poll_once():
             log_error(f"[{job['label']}] 処理中にエラーが発生しました", traceback.format_exc())
             error_msg = f"{type(exc).__name__}: {exc}"
             set_job_done(ws, job, start, error_msg, success=False, log=log)
+
+    # オッズ自動更新スイッチ（row5）。row2〜4の「1回きりの実行トリガー」とは違い、
+    # ONの間はポーリングのたびに繰り返し実行し続ける
+    try:
+        if get_auto_refresh_switch(ws):
+            if now.hour >= AUTO_REFRESH_FORCE_OFF_HOUR:
+                set_auto_refresh_switch(ws, False, log=log)
+                log(f"オッズ自動更新: {AUTO_REFRESH_FORCE_OFF_HOUR}時になったため自動的にOFFへ戻しました")
+                any_ran = True
+            else:
+                message = run_odds_refresh_job(log=log)
+                set_auto_refresh_last_updated(ws)
+                log(f"オッズ自動更新: {message}")
+                any_ran = True
+    except Exception:
+        log_error("オッズ自動更新の処理中にエラーが発生しました", traceback.format_exc())
 
     if not any_ran:
         log("チェック済みの処理なし")

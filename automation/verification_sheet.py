@@ -34,7 +34,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
 from automation.sheet_config import SPREADSHEET_ID, VERIFICATION_SHEET_NAME, require_spreadsheet_id
-from analysis.prediction_verification import RANKS, filter_most_recent_date, group_by_month, summarize
+from analysis.prediction_verification import (
+    MARK_BOX_SIZE, RANKS, filter_most_recent_date, group_by_month, summarize,
+    summarize_honmei_win, summarize_mark_box_umaren,
+)
 from prediction.predict_race import CLASS_FILTER
 from prediction.sheets_report import get_client
 
@@ -103,6 +106,19 @@ for _rank in RANKS:
 HISTORY_RECOVERY_COL_INDEX = {rank: 1 + i * 3 + 2 for i, rank in enumerate(RANKS)}
 MAX_CHART_ROWS = 2000
 
+# ---- ◎(単勝1点買い)・印5頭BOX(馬連)の成績。S/A/B買い目推奨（EV・オッズ上限による
+#      選別があり、該当馬がいなければ0件の日もある）とは指標の性質がまったく異なる
+#      （レースごとに毎回必ず1点/1BOX買う前提）ため、見出しを分けて表示する。
+#      ランク別集計（A〜I列）の右側・K列以降に、累積成績サマリーと同じ行に
+#      並べて配置する（スクロールせずに見えるようにするため。実行履歴HISTORY
+#      は下方向に伸び続けるが列は別なので衝突しない） ----
+MARK_BOX_COL = 11  # K列（1-indexed）
+MARK_BOX_TITLE_ROW = CUMULATIVE_TITLE_ROW
+MARK_BOX_HEADER_ROW = MARK_BOX_TITLE_ROW + 1
+MARK_BOX_DATA_START_ROW = MARK_BOX_HEADER_ROW + 1
+MARK_BOX_HEADER = ["指標", "対象レース数", "的中数", "的中率(%)", "総購入額(円)", "総払戻額(円)", "回収率(%)", "払戻欠損"]
+MARK_BOX_LABELS = ["◎（単勝1点買い）", f"印{MARK_BOX_SIZE}頭BOX（馬連）"]
+
 
 def get_sheet():
     require_spreadsheet_id()
@@ -132,9 +148,12 @@ def _rank_summary_rows(rows):
 
 def ensure_verification_sheet(sh, log=print):
     """「検証結果」シートが無ければ作成し、全ブロックの見出しを書き込む。
-    既にあれば何もしない（レイアウトを変えた場合はrebuild_layout()を使う）"""
+    既にあれば、既存レイアウトはそのままに、後から追加したセクション
+    （◎単勝1点買い・印5頭BOX馬連等）だけ無ければ追加する
+    （レイアウト自体を変えた場合はrebuild_layout()を使う）"""
     try:
         ws = sh.worksheet(VERIFICATION_SHEET_NAME)
+        _ensure_mark_box_section(ws, log=log)
         return ws
     except gspread.WorksheetNotFound:
         pass
@@ -142,7 +161,11 @@ def ensure_verification_sheet(sh, log=print):
     # colsは表の列数（最大I列=9列）ぎりぎりにすると、グラフをそれより右へ
     # 配置しようとした際にAPIエラー（グリッド範囲外）になる・境界ぎりぎりの
     # 列だと描画がおかしくなることがあったため、余裕を持たせる
-    ws = sh.add_worksheet(title=VERIFICATION_SHEET_NAME, rows=HISTORY_START_ROW + MAX_CHART_ROWS, cols=30)
+    ws = sh.add_worksheet(
+        title=VERIFICATION_SHEET_NAME,
+        rows=HISTORY_START_ROW + MAX_CHART_ROWS,
+        cols=30,
+    )
     log(f"「{VERIFICATION_SHEET_NAME}」シートを新規作成")
     _write_layout_headers(ws)
     # 行固定（freeze）をグラフのすぐ上/重なる範囲まで効かせると、フローティング
@@ -150,8 +173,47 @@ def ensure_verification_sheet(sh, log=print):
     # anchorCellと異なる位置にずれる事象が起きたため、固定は設定ブロックの
     # みにとどめる（グラフの手前で止め、グラフの領域には掛けない）
     ws.freeze(rows=len(SETTINGS_BLOCK))
+    _ensure_mark_box_section(ws, log=log)
 
     return ws
+
+
+def _mark_box_col_letter(offset):
+    """MARK_BOX_COL（K列）から数えてoffset列右（0=K自身）の列文字を返す"""
+    return gspread.utils.rowcol_to_a1(1, MARK_BOX_COL + offset).rstrip("1")
+
+
+def _ensure_mark_box_section(ws, log=print):
+    """◎単勝1点買い・印5頭BOX馬連の見出し行が無ければ追加する
+    （既存シートへの後付け追加に対応。sheet_control_panel.pyの
+    _ensure_auto_refresh_row()と同じ考え方。K列以降が足りなければ列を追加する）"""
+    needed_cols = MARK_BOX_COL + len(MARK_BOX_HEADER) - 1
+    if ws.col_count < needed_cols:
+        ws.add_cols(needed_cols - ws.col_count)
+
+    title_col = _mark_box_col_letter(0)
+    if ws.acell(f"{title_col}{MARK_BOX_TITLE_ROW}").value:
+        return
+
+    ws.update(
+        [["■ ◎(単勝1点買い)・印5頭BOX(馬連)の成績（S/A/B買い目推奨とは指標が異なるため区別して表示）"]],
+        f"{title_col}{MARK_BOX_TITLE_ROW}", value_input_option="USER_ENTERED",
+    )
+    ws.format(f"{title_col}{MARK_BOX_TITLE_ROW}", TITLE_FORMAT)
+    ws.update([MARK_BOX_HEADER], f"{title_col}{MARK_BOX_HEADER_ROW}", value_input_option="USER_ENTERED")
+    last_col = _mark_box_col_letter(len(MARK_BOX_HEADER) - 1)
+    ws.format(f"{title_col}{MARK_BOX_HEADER_ROW}:{last_col}{MARK_BOX_HEADER_ROW}", HEADER_FORMAT)
+
+    data_end = MARK_BOX_DATA_START_ROW + len(MARK_BOX_LABELS) - 1
+    percent_col = _mark_box_col_letter(MARK_BOX_HEADER.index("的中率(%)"))
+    recovery_col = _mark_box_col_letter(MARK_BOX_HEADER.index("回収率(%)"))
+    ws.format(f"{percent_col}{MARK_BOX_DATA_START_ROW}:{percent_col}{data_end}", PERCENT_FORMAT)
+    ws.format(f"{recovery_col}{MARK_BOX_DATA_START_ROW}:{recovery_col}{data_end}", PERCENT_FORMAT)
+    for header_name in ("総購入額(円)", "総払戻額(円)"):
+        col_letter = _mark_box_col_letter(MARK_BOX_HEADER.index(header_name))
+        ws.format(f"{col_letter}{MARK_BOX_DATA_START_ROW}:{col_letter}{data_end}", YEN_FORMAT)
+
+    log("「◎単勝1点買い・印5頭BOX馬連」セクションを追加（K列以降）")
 
 
 def _write_layout_headers(ws):
@@ -262,6 +324,32 @@ def append_verification_result(ws, rows, log=print):
     log(f"検証結果シートへ1行追記（{next_row}行目）: {row}")
 
 
+def write_mark_box_summary(ws, rows, log=print):
+    """◎単勝1点買い・印5頭BOX馬連の成績を計算し、専用セクションへ書き込む
+    （S/A/B買い目推奨とは別集計。analysis/prediction_verification.py参照）"""
+    def _row(result):
+        return [
+            result["対象レース数"],
+            result["的中数"],
+            round(result["的中率(%)"], 2) if result["対象レース数"] else "",
+            result["総購入額(円)"],
+            round(result["総払戻額(円)"], 0),
+            round(result["回収率(%)"], 2) if result["対象レース数"] else "",
+            result["払戻欠損"],
+        ]
+
+    honmei_result = summarize_honmei_win(rows)
+    box_result = summarize_mark_box_umaren(rows)
+    table = [
+        [MARK_BOX_LABELS[0]] + _row(honmei_result),
+        [MARK_BOX_LABELS[1]] + _row(box_result),
+    ]
+    ws.update(table, f"{_mark_box_col_letter(0)}{MARK_BOX_DATA_START_ROW}", value_input_option="USER_ENTERED")
+    log(f"◎単勝1点買い・印{MARK_BOX_SIZE}頭BOX馬連の成績更新: "
+        f"◎ {honmei_result['的中数']}/{honmei_result['対象レース数']}件 "
+        f"BOX {box_result['的中数']}/{box_result['対象レース数']}件")
+
+
 def ensure_chart(sh, ws, log=print):
     """回収率(%)の推移（実行履歴が元データ）の折れ線グラフを、S/A/Bランク別の
     3本の系列で、まだ無ければ作成する。
@@ -344,6 +432,7 @@ def update_verification_sheet(rows, result, log=print):
     write_cumulative_summary(ws, rows, log=log)
     write_recent_summary(ws, rows, log=log)
     write_monthly_table(ws, rows, log=log)
+    write_mark_box_summary(ws, rows, log=log)
     ensure_chart(sh, ws, log=log)
     return sh, ws
 

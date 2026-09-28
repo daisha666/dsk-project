@@ -15,6 +15,7 @@ LightGBMへ渡す）を踏襲。
   レコード同士になりやすく、テスト精度が不当に高く出てしまう。
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -64,6 +65,12 @@ def train_model(train_df, feature_columns=None, categorical_columns=None, lgbm_p
 
     X_train = train_df[feature_columns]
     y_train = train_df["label"]
+
+    # n_jobsを明示しない場合、LightGBMは内部でjoblib.cpu_count(only_physical_cores=True)
+    # を呼び、Windowsではこれがpowershell.exeをsubprocessで起動する（ウィンドウ抑制フラグ
+    # 無し）。pythonw.exeから呼ぶとコンソールウィンドウが毎回一瞬表示される原因になるため、
+    # 固定値を渡してこの呼び出し自体を回避する（2026-09-06、黒い画面の根本原因として特定）
+    lgbm_params = {"n_jobs": os.cpu_count(), **lgbm_params}
 
     model = lgb.LGBMClassifier(
         objective="binary",

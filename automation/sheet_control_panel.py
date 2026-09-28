@@ -4,16 +4,19 @@ dsk_Project
 Version 0.2
 
 PROJECT_EVのautomation/sheet_control_panel.pyと同じ設計（チェック行を
-ポーリングし、チェックが入ったら該当処理を実行、完了後に自動でOFFへ戻す。
-row5はオッズ自動更新の状態フラグで、ユーザー操作の対象ではない）を踏襲。
+ポーリングし、チェックが入ったら該当処理を実行、完了後に自動でOFFへ戻す）を踏襲。
 
 行構成:
   row2: ①データ取得・検証・予想生成（出馬表取得→predict_race.py）
   row3: ②オッズ取得・予想更新（tfwオッズ再取得→期待値再計算、軽量・モデル再学習なし）
   row4: ③結果取得・検証（結果取得→prediction_verification.py）
-  row5: オッズ自動更新の状態フラグ（開催日9:30〜17:00・5分おき。
-        automation/odds_auto_refresh_job.pyが自動でON/OFFする。ユーザーは
-        変更しない。B5=状態〈TRUE/FALSE〉 C5=最終更新時刻）
+  row5: オッズ自動更新スイッチ（2026-09-08、時間指定トリガー方式からユーザー操作の
+        スイッチ方式へ変更。B5をONにするとwatcher.pyが5分おきのポーリングのたびに
+        ②オッズ取得・予想更新を実行、OFFで停止。停止し忘れ防止のため当日20時に
+        なると自動でOFFに戻る。B5=ON/OFFスイッチ〈TRUE/FALSE、ONで背景が緑色に
+        なる〉 C5=最終更新時刻。旧方式〈automation/odds_auto_refresh_job.py、
+        Task Schedulerから開催日9:30〜17:00に5分おきで直接起動する独立ジョブが
+        完全自動でON/OFFしていた〉は廃止した）
 
 列構成: A=処理名 B=実行チェック C=ステータス D=開始時刻 E=完了時刻 F=所要時間(秒) G=最新ログ
 """
@@ -39,9 +42,20 @@ JOBS = [
 ]
 
 AUTO_REFRESH_ROW = 5
-AUTO_REFRESH_LABEL = "オッズ自動更新（開催日9:30〜17:00・5分おき・自動ON/OFF）"
+AUTO_REFRESH_LABEL = "オッズ自動更新（ONで5分おきに稼働・20時に自動OFF）"
 AUTO_REFRESH_SWITCH_CELL = f"B{AUTO_REFRESH_ROW}"
 AUTO_REFRESH_LAST_UPDATED_CELL = f"C{AUTO_REFRESH_ROW}"
+
+# Watcher稼働監視（2026-09-11追加）: watcher.pyが毎回のポーリングでB6に
+# 現在時刻を書き込む「ハートビート」。C6はNOW()との差分を見る数式で、
+# WATCHER_STALE_THRESHOLD_MINUTES分を超えて更新が無ければ「⚠️」表示に切り替わる。
+# Task Scheduler側が停止する（9/8に実際発生）と、このB6が古いまま止まるため、
+# スプレッドシート・アプリ双方からWatcherの生死を確認できるようにするための仕組み
+WATCHER_HEARTBEAT_ROW = 6
+WATCHER_HEARTBEAT_LABEL = "Watcher稼働監視（最終ポーリング時刻）"
+WATCHER_HEARTBEAT_CELL = f"B{WATCHER_HEARTBEAT_ROW}"
+WATCHER_HEARTBEAT_STATUS_CELL = f"C{WATCHER_HEARTBEAT_ROW}"
+WATCHER_STALE_THRESHOLD_MINUTES = 60
 
 
 def get_sheet():
@@ -87,6 +101,7 @@ def ensure_control_panel(sh, log=print):
                           f"A{j['row']}", value_input_option="USER_ENTERED")
 
     _ensure_auto_refresh_row(sh, ws, log=log)
+    _ensure_watcher_heartbeat_row(sh, ws, log=log)
 
     return ws
 
@@ -96,22 +111,128 @@ def _ensure_auto_refresh_row(sh, ws, log=print):
     現在のON/OFF状態・最終更新時刻は壊さずラベル（A列）だけ揃える"""
     existing_values = ws.get_all_values()
     row_exists = len(existing_values) >= AUTO_REFRESH_ROW and existing_values[AUTO_REFRESH_ROW - 1]
-    if row_exists:
-        return
+    if not row_exists:
+        ws.update([[AUTO_REFRESH_LABEL, False, ""]], f"A{AUTO_REFRESH_ROW}", value_input_option="USER_ENTERED")
+        requests = [{
+            "setDataValidation": {
+                "range": {
+                    "sheetId": ws.id,
+                    "startRowIndex": AUTO_REFRESH_ROW - 1, "endRowIndex": AUTO_REFRESH_ROW,
+                    "startColumnIndex": 1, "endColumnIndex": 2,
+                },
+                "rule": {"condition": {"type": "BOOLEAN"}, "strict": True},
+            }
+        }]
+        sh.batch_update({"requests": requests})
+        log(f"「{AUTO_REFRESH_LABEL}」行を追加")
 
-    ws.update([[AUTO_REFRESH_LABEL, False, ""]], f"A{AUTO_REFRESH_ROW}", value_input_option="USER_ENTERED")
-    requests = [{
-        "setDataValidation": {
-            "range": {
-                "sheetId": ws.id,
-                "startRowIndex": AUTO_REFRESH_ROW - 1, "endRowIndex": AUTO_REFRESH_ROW,
-                "startColumnIndex": 1, "endColumnIndex": 2,
+    _ensure_auto_refresh_conditional_format(sh, ws, log=log)
+
+
+def _ensure_auto_refresh_conditional_format(sh, ws, log=print):
+    """スイッチ（B5）がONのとき、A5:C5の背景を緑にする条件付き書式を設定する
+    （視覚的にひと目でON/OFFが分かるようにするため。2026-09-08追加）。
+    既存シートに対しても、まだ設定が無ければ後付けで追加する（row5自体は
+    既に存在する既存シートでも通るよう、ensure_control_panel()から毎回呼ぶ）。
+    既に同じ範囲に条件付き書式が設定済みなら何もしない（重複追加を防ぐ）"""
+    row_index = AUTO_REFRESH_ROW - 1  # 0-indexed
+    meta = sh.fetch_sheet_metadata()
+    sheet_meta = next((s for s in meta["sheets"] if s["properties"]["sheetId"] == ws.id), None)
+    existing_rules = sheet_meta.get("conditionalFormats", []) if sheet_meta else []
+    for rule in existing_rules:
+        for rng in rule.get("ranges", []):
+            if rng.get("startRowIndex") == row_index:
+                return
+
+    request = {
+        "addConditionalFormatRule": {
+            "rule": {
+                "ranges": [{
+                    "sheetId": ws.id,
+                    "startRowIndex": row_index, "endRowIndex": row_index + 1,
+                    "startColumnIndex": 0, "endColumnIndex": 3,
+                }],
+                "booleanRule": {
+                    "condition": {
+                        "type": "CUSTOM_FORMULA",
+                        "values": [{"userEnteredValue": f"=${AUTO_REFRESH_SWITCH_CELL}=TRUE"}],
+                    },
+                    "format": {"backgroundColor": {"red": 0.72, "green": 0.93, "blue": 0.75}},
+                },
             },
-            "rule": {"condition": {"type": "BOOLEAN"}, "strict": True},
+            "index": 0,
         }
-    }]
-    sh.batch_update({"requests": requests})
-    log(f"「{AUTO_REFRESH_LABEL}」行を追加")
+    }
+    sh.batch_update({"requests": [request]})
+    log("オッズ自動更新スイッチの条件付き書式（ON時に緑）を設定")
+
+
+def _ensure_watcher_heartbeat_row(sh, ws, log=print):
+    """row6（Watcher稼働監視）が無ければ追加する。C6には、B6（ハートビート時刻）と
+    現在時刻の差がWATCHER_STALE_THRESHOLD_MINUTES分を超えたら⚠️表示に切り替わる
+    数式を入れておく（NOW()はスプレッドシートを開いている間、自動再計算される）。
+    既にあれば、ラベル・数式・条件付き書式は壊さずそのままにする"""
+    existing_values = ws.get_all_values()
+    row_exists = len(existing_values) >= WATCHER_HEARTBEAT_ROW and existing_values[WATCHER_HEARTBEAT_ROW - 1]
+    if not row_exists:
+        status_formula = (
+            f'=IF({WATCHER_HEARTBEAT_CELL}="","未実行",'
+            f'IF((NOW()-{WATCHER_HEARTBEAT_CELL})*1440>{WATCHER_STALE_THRESHOLD_MINUTES},'
+            f'"⚠️ "&TEXT((NOW()-{WATCHER_HEARTBEAT_CELL})*1440,"0")&"分 更新なし","🟢 正常"))'
+        )
+        ws.update([[WATCHER_HEARTBEAT_LABEL, "", status_formula]],
+                  f"A{WATCHER_HEARTBEAT_ROW}", value_input_option="USER_ENTERED")
+        log(f"「{WATCHER_HEARTBEAT_LABEL}」行を追加")
+
+    _ensure_watcher_heartbeat_conditional_format(sh, ws, log=log)
+
+
+def _ensure_watcher_heartbeat_conditional_format(sh, ws, log=print):
+    """ハートビートがWATCHER_STALE_THRESHOLD_MINUTES分を超えて更新されていないとき、
+    A6:C6の背景を赤くする条件付き書式を設定する（2026-09-11追加）。
+    既に同じ範囲に設定済みなら何もしない（重複追加を防ぐ）"""
+    row_index = WATCHER_HEARTBEAT_ROW - 1  # 0-indexed
+    meta = sh.fetch_sheet_metadata()
+    sheet_meta = next((s for s in meta["sheets"] if s["properties"]["sheetId"] == ws.id), None)
+    existing_rules = sheet_meta.get("conditionalFormats", []) if sheet_meta else []
+    for rule in existing_rules:
+        for rng in rule.get("ranges", []):
+            if rng.get("startRowIndex") == row_index:
+                return
+
+    request = {
+        "addConditionalFormatRule": {
+            "rule": {
+                "ranges": [{
+                    "sheetId": ws.id,
+                    "startRowIndex": row_index, "endRowIndex": row_index + 1,
+                    "startColumnIndex": 0, "endColumnIndex": 3,
+                }],
+                "booleanRule": {
+                    "condition": {
+                        "type": "CUSTOM_FORMULA",
+                        "values": [{
+                            "userEnteredValue":
+                                f'=AND(${WATCHER_HEARTBEAT_CELL}<>"",'
+                                f'(NOW()-${WATCHER_HEARTBEAT_CELL})*1440>{WATCHER_STALE_THRESHOLD_MINUTES})'
+                        }],
+                    },
+                    "format": {"backgroundColor": {"red": 1.0, "green": 0.42, "blue": 0.42}},
+                },
+            },
+            "index": 0,
+        }
+    }
+    sh.batch_update({"requests": [request]})
+    log("Watcher稼働監視の条件付き書式（停止時に赤）を設定")
+
+
+def set_watcher_heartbeat(ws, when=None):
+    """watcher.pyが毎回のポーリングで呼ぶ。ジョブの実行有無に関わらず、
+    「今、正常にポーリングできた」ことの証跡としてB6に現在時刻を書き込む"""
+    when = when or datetime.now()
+    ws.update([[when.strftime("%Y-%m-%d %H:%M:%S")]], WATCHER_HEARTBEAT_CELL,
+              value_input_option="USER_ENTERED")
 
 
 def get_auto_refresh_switch(ws):
